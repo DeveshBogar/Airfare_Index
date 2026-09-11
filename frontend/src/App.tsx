@@ -231,10 +231,8 @@ function App() {
               <RouteFilter routes={data.routes} value={routeFilterId} onChange={handleRouteFilterChange} />
               <BookingAdvice advice={bookingAdvice} route={routeFilter} loading={routeDataLoading} />
               <PriceHistory data={priceHistory} route={routeFilter} loading={routeDataLoading} />
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-                <SectorHeatmap cells={data.priceGrid.cells} routeFilter={routeFilter} routeLookup={routeLookup} />
-                <ElasticityChart data={elasticityData} routeFilter={routeFilter} />
-              </div>
+              <SectorHeatmap cells={data.priceGrid.cells} routeFilter={routeFilter} routeLookup={routeLookup} />
+              <ElasticityChart data={elasticityData} routeFilter={routeFilter} />
               <FaresTable rows={data.fares} routeFilter={routeFilter} routeLookup={routeLookup} />
             </TabPanel>
 
