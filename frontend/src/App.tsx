@@ -11,6 +11,7 @@ import {
   type ElasticityPoint,
   type FareQuote,
   type IndexDailyPoint,
+  type News,
   type PriceGrid,
   type RouteOut,
   type RoutePriceHistory,
@@ -29,6 +30,7 @@ import { Header } from "./components/Header";
 import { HeroStat } from "./components/HeroStat";
 import { KpiCards } from "./components/KpiCards";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
+import { NewsFeed } from "./components/NewsFeed";
 import { PageSummary } from "./components/PageSummary";
 import { PriceHistory } from "./components/PriceHistory";
 import { RouteFilter } from "./components/RouteFilter";
@@ -83,6 +85,8 @@ function App() {
   const [bookingAdvice, setBookingAdvice] = useState<BookingAdviceData | null>(null);
   const [priceHistory, setPriceHistory] = useState<RoutePriceHistory | null>(null);
   const [routeDataLoading, setRouteDataLoading] = useState(false);
+  const [news, setNews] = useState<News | null>(null);
+  const [newsLoading, setNewsLoading] = useState(true);
 
   async function load() {
     setRefreshing(true);
@@ -126,6 +130,18 @@ function App() {
     load();
     const id = setInterval(load, 60_000);
     return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    // Fetched once, not on the 60s poll: the backend already caches these
+    // real headlines for 15 minutes (see app.news.fetch_news), and a slow
+    // or unreachable news source should never delay the real fare/index
+    // data the rest of the dashboard depends on.
+    api
+      .news()
+      .then(setNews)
+      .catch(() => setNews(null))
+      .finally(() => setNewsLoading(false));
   }, []);
 
   useEffect(() => {
@@ -199,6 +215,7 @@ function App() {
               <CpiDivergence data={data.cpiDivergence} />
               <KpiCards backtest={data.backtest} coverage={data.coverage} />
               <TrendChart data={data.daily} />
+              <NewsFeed news={news} loading={newsLoading} />
               <Footer backtest={data.backtest} coverage={data.coverage} />
             </TabPanel>
 

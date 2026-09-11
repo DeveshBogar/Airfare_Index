@@ -234,6 +234,27 @@ class PriceHistoryPointOut(BaseModel):
     sample_size: int
 
 
+class NewsItemOut(BaseModel):
+    title: str
+    link: str
+    source: str
+    published_at: dt.datetime | None = None
+    categories: list[str]
+    summary: str
+
+
+class NewsSourceCheckOut(BaseModel):
+    name: str
+    allowed: bool
+    reason: str
+
+
+class NewsOut(BaseModel):
+    items: list[NewsItemOut]
+    as_of: dt.datetime
+    sources_checked: list[NewsSourceCheckOut]
+
+
 class RoutePriceHistoryOut(BaseModel):
     route: str
     days_of_history: int

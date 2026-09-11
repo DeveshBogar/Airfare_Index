@@ -26,6 +26,15 @@ export function apWindowFull(days: number): string {
   return AP_WINDOW_FULL[days] ?? `Booked ${days} days ahead`;
 }
 
+export const NEWS_CATEGORY_LABEL: Record<string, string> = {
+  fuel: "Fuel cost",
+  regulatory: "Regulation & policy",
+  airline: "Airline & capacity",
+  demand: "Travel demand",
+  disruption: "Disruption",
+  fare: "Fares",
+};
+
 export function formatINR(value: number): string {
   return `₹${Math.round(value).toLocaleString("en-IN")}`;
 }
