@@ -29,6 +29,7 @@ import { Header } from "./components/Header";
 import { HeroStat } from "./components/HeroStat";
 import { KpiCards } from "./components/KpiCards";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
+import { PageSummary } from "./components/PageSummary";
 import { PriceHistory } from "./components/PriceHistory";
 import { RouteFilter } from "./components/RouteFilter";
 import { SectorHeatmap } from "./components/SectorHeatmap";
@@ -188,6 +189,10 @@ function App() {
                 Couldn't refresh just now ({error}) — showing the last data we had.
               </div>
             )}
+
+            <div className="mb-4">
+              <PageSummary daily={data.daily} />
+            </div>
 
             <TabPanel tabKey="overview" active={activeTab}>
               <HeroStat daily={data.daily} backtest={data.backtest} />
