@@ -51,14 +51,30 @@
    instead (the standard approach for dark UIs) and gets no shadow. */
 :root {
   --shadow-card: 0 1px 2px rgba(20, 20, 15, 0.04), 0 2px 8px rgba(20, 20, 15, 0.05);
+
+  /* A quiet page-wide wash using the app's own brand blue (--color-series-1),
+     not a new color — anchored high on the page so it reads mainly behind
+     the header and the gaps between cards, never competing with card
+     content (which is always opaque). Pure CSS, no JS/animation, so it
+     carries none of the performance cost the earlier animated background
+     had. Light-mode only: the same wash over the dark palette reads muddy
+     rather than premium, so dark mode gets a plain flat page color instead
+     (same reasoning as --shadow-card above). */
+  --bg-gradient: radial-gradient(
+    1100px 550px at 50% -8%,
+    color-mix(in oklab, var(--color-series-1) 9%, transparent),
+    transparent 70%
+  );
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --shadow-card: none;
+    --bg-gradient: none;
   }
 }
 :root[data-theme="dark"] {
   --shadow-card: none;
+  --bg-gradient: none;
 }
 
 /* Dark tokens apply in two cases: the OS/browser prefers dark AND the
@@ -133,7 +149,9 @@
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background: var(--color-page);
+  background-color: var(--color-page);
+  background-image: var(--bg-gradient);
+  background-attachment: fixed;
   color: var(--color-ink);
 }
 

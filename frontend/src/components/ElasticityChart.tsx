@@ -3,6 +3,46 @@ import type { ElasticityPoint, RouteOut } from "../api";
 import { AP_WINDOW_SHORT, apWindowFull, formatINR } from "../labels";
 import { Panel } from "./Panel";
 
+interface ElasticityTooltipItem {
+  dataKey?: string;
+  name?: string;
+  value?: number;
+  payload?: { full?: string };
+}
+
+// A custom tooltip, not Recharts' default formatter: the bar's own fill
+// (color-mix(...15%...)) is deliberately pale so it reads as a quiet
+// background band on the chart - but Recharts' default tooltip reuses
+// that same series color for the tooltip text, which made "Highest price
+// seen" nearly unreadable against the tooltip background. Each row here
+// gets its own explicit, legible color instead of inheriting the chart's
+// render color.
+function ElasticityTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: ElasticityTooltipItem[];
+  label?: string;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  const full = payload[0]?.payload?.full ?? label;
+  return (
+    <div className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-[13px] shadow-sm">
+      <div className="font-semibold text-ink mb-1">{full}</div>
+      {payload.map((entry) => (
+        <div
+          key={entry.dataKey}
+          style={{ color: entry.dataKey === "mean_fare" ? "var(--color-series-1)" : "var(--color-ink-secondary)" }}
+        >
+          {entry.name}: {formatINR(Number(entry.value ?? 0))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function ElasticityChart({ data, routeFilter }: { data: ElasticityPoint[]; routeFilter: RouteOut | null }) {
   const chartData = data.map((d) => ({
     ...d,
@@ -29,16 +69,7 @@ export function ElasticityChart({ data, routeFilter }: { data: ElasticityPoint[]
             <CartesianGrid stroke="var(--color-hairline)" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 12, fill: "var(--color-ink-muted)" }} axisLine={{ stroke: "var(--color-axis)" }} tickLine={false} />
             <YAxis tick={{ fontSize: 12, fill: "var(--color-ink-muted)" }} axisLine={false} tickLine={false} />
-            <Tooltip
-              contentStyle={{
-                background: "var(--color-surface-raised)",
-                border: "1px solid var(--color-border)",
-                borderRadius: 8,
-                fontSize: 13,
-              }}
-              formatter={(v, name) => [formatINR(Number(v)), name]}
-              labelFormatter={(_label, payload) => payload?.[0]?.payload?.full ?? _label}
-            />
+            <Tooltip content={<ElasticityTooltip />} />
             <Bar
               dataKey="max_fare"
               name="Highest price seen"

@@ -273,6 +273,27 @@ export interface FareQuote {
   sold_out: boolean;
 }
 
+export interface NewsItem {
+  title: string;
+  link: string;
+  source: string;
+  published_at: string | null;
+  categories: string[];
+  summary: string;
+}
+
+export interface NewsSourceCheck {
+  name: string;
+  allowed: boolean;
+  reason: string;
+}
+
+export interface News {
+  items: NewsItem[];
+  as_of: string;
+  sources_checked: NewsSourceCheck[];
+}
+
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
@@ -298,4 +319,5 @@ export const api = {
   heatmap: () => getJSON<HeatmapCell[]>("/heatmap"),
   priceGrid: () => getJSON<PriceGrid>("/price-grid"),
   fares: () => getJSON<FareQuote[]>("/fares?limit=300"),
+  news: () => getJSON<News>("/news"),
 };
