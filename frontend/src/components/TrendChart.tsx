@@ -17,6 +17,55 @@ const SERIES = [
   { key: "fisher", label: "Balanced average (headline)", color: "var(--color-series-3)" },
 ];
 
+// Fixed-basket (Laspeyres) and updated-basket (Paasche) only diverge from
+// the headline once the routes actually contributing prices shift between
+// days - with this little real history, they usually haven't yet, so the
+// tooltip would otherwise show the same number three times. Below this gap
+// (in index points) the two secondary methods are folded into one "agrees
+// with the headline" line instead of repeating an identical value.
+const AGREEMENT_THRESHOLD = 0.05;
+
+function TrendTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: { payload?: IndexDailyPoint }[];
+  label?: string;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  const row = payload[0]?.payload;
+  if (!row || row.fisher == null) return null;
+
+  const headline = row.fisher;
+  const others = SERIES.filter((s) => s.key !== "fisher" && row[s.key as "laspeyres" | "paasche"] != null);
+  const diverging = others.filter(
+    (s) => Math.abs((row[s.key as "laspeyres" | "paasche"] as number) - headline) >= AGREEMENT_THRESHOLD
+  );
+  const agreeing = others.filter((s) => !diverging.includes(s));
+
+  return (
+    <div className="rounded-lg border border-border bg-surface-raised px-3 py-2 text-[13px] shadow-sm">
+      <div className="font-semibold text-ink mb-1">Index — {label}</div>
+      <div style={{ color: "var(--color-series-3)" }} className="font-medium">
+        Balanced average (headline): {headline.toFixed(1)}
+      </div>
+      {diverging.map((s) => (
+        <div key={s.key} style={{ color: s.color }}>
+          {s.label}: {(row[s.key as "laspeyres" | "paasche"] as number).toFixed(1)}
+        </div>
+      ))}
+      {agreeing.length > 0 && (
+        <div className="text-ink-muted text-xs mt-1">
+          {agreeing.map((s) => s.label).join(" and ")} {agreeing.length === 1 ? "agrees" : "agree"} with the headline
+          here.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function TrendChart({ data }: { data: IndexDailyPoint[] }) {
   return (
     <Panel
@@ -31,16 +80,7 @@ export function TrendChart({ data }: { data: IndexDailyPoint[] }) {
             <CartesianGrid stroke="var(--color-hairline)" vertical={false} />
             <XAxis dataKey="date" tick={{ fontSize: 12, fill: "var(--color-ink-muted)" }} axisLine={{ stroke: "var(--color-axis)" }} tickLine={false} />
             <YAxis domain={["auto", "auto"]} tick={{ fontSize: 12, fill: "var(--color-ink-muted)" }} axisLine={false} tickLine={false} />
-            <Tooltip
-              contentStyle={{
-                background: "var(--color-surface-raised)",
-                border: "1px solid var(--color-border)",
-                borderRadius: 8,
-                fontSize: 13,
-              }}
-              labelFormatter={(label) => `Index — ${label}`}
-              formatter={(value, name) => [Number(value).toFixed(1), name]}
-            />
+            <Tooltip content={<TrendTooltip />} />
             <Legend
               formatter={(_value, entry) => {
                 const s = SERIES.find((s) => s.key === entry.dataKey);
