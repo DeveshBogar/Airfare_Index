@@ -1,0 +1,171 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------
+   Design tokens. Light values are the defaults below; dark values
+   override the same custom properties under prefers-color-scheme, so
+   every utility that references a token (bg-surface, text-ink, etc.)
+   flips automatically — no dark: prefix needed anywhere in components.
+   ------------------------------------------------------------------ */
+@theme {
+  --color-page: #f9f9f7;
+  --color-surface: #fcfcfb;
+  --color-surface-raised: #ffffff;
+
+  --color-ink: #0b0b0b;
+  --color-ink-secondary: #52514e;
+  --color-ink-muted: #898781;
+
+  --color-hairline: #e1e0d9;
+  --color-axis: #c3c2b7;
+  --color-border: rgba(11, 11, 11, 0.1);
+
+  --color-success-text: #006300;
+
+  /* Categorical series — fixed order, never reassigned per-chart */
+  --color-series-1: #2a78d6; /* blue */
+  --color-series-2: #eb6834; /* orange */
+  --color-series-3: #1baf7a; /* aqua */
+  --color-series-4: #eda100; /* yellow */
+  --color-series-5: #e87ba4; /* magenta */
+  --color-series-6: #008300; /* green */
+  --color-series-7: #4a3aa7; /* violet */
+  --color-series-8: #e34948; /* red */
+
+  /* Status — reserved, never used as a categorical series */
+  --color-good: #0ca30c;
+  --color-warning: #fab219;
+  --color-serious: #ec835a;
+  --color-critical: #d03b3b;
+
+  /* Diverging pair for the fare heatmap (cheap <-> expensive) */
+  --color-diverge-cold: #2a78d6;
+  --color-diverge-warm: #e34948;
+  --color-diverge-mid: #f0efec;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Card elevation. A soft shadow reads clearly against the light page
+   background; against a dark page the same shadow is nearly invisible
+   and looks muddy, so dark mode relies on the border for definition
+   instead (the standard approach for dark UIs) and gets no shadow. */
+:root {
+  --shadow-card: 0 1px 2px rgba(20, 20, 15, 0.04), 0 2px 8px rgba(20, 20, 15, 0.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --shadow-card: none;
+  }
+}
+:root[data-theme="dark"] {
+  --shadow-card: none;
+}
+
+/* Dark tokens apply in two cases: the OS/browser prefers dark AND the
+   user hasn't explicitly forced light (data-theme="light"), OR the user
+   has explicitly forced dark (data-theme="dark") regardless of OS. A
+   plain :root with no data-theme attribute (the default, "system" mode)
+   is governed purely by the media query — see theme.ts / ThemeToggle. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-page: #0d0d0d;
+    --color-surface: #1a1a19;
+    --color-surface-raised: #202220;
+
+    --color-ink: #ffffff;
+    --color-ink-secondary: #c3c2b7;
+    --color-ink-muted: #898781;
+
+    --color-hairline: #2c2c2a;
+    --color-axis: #383835;
+    --color-border: rgba(255, 255, 255, 0.1);
+
+    --color-success-text: #0ca30c;
+
+    --color-series-1: #3987e5;
+    --color-series-2: #d95926;
+    --color-series-3: #199e70;
+    --color-series-4: #c98500;
+    --color-series-5: #d55181;
+    --color-series-6: #008300;
+    --color-series-7: #9085e9;
+    --color-series-8: #e66767;
+
+    --color-diverge-cold: #3987e5;
+    --color-diverge-warm: #e66767;
+    --color-diverge-mid: #383835;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-page: #0d0d0d;
+  --color-surface: #1a1a19;
+  --color-surface-raised: #202220;
+
+  --color-ink: #ffffff;
+  --color-ink-secondary: #c3c2b7;
+  --color-ink-muted: #898781;
+
+  --color-hairline: #2c2c2a;
+  --color-axis: #383835;
+  --color-border: rgba(255, 255, 255, 0.1);
+
+  --color-success-text: #0ca30c;
+
+  --color-series-1: #3987e5;
+  --color-series-2: #d95926;
+  --color-series-3: #199e70;
+  --color-series-4: #c98500;
+  --color-series-5: #d55181;
+  --color-series-6: #008300;
+  --color-series-7: #9085e9;
+  --color-series-8: #e66767;
+
+  --color-diverge-cold: #3987e5;
+  --color-diverge-warm: #e66767;
+  --color-diverge-mid: #383835;
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-page);
+  color: var(--color-ink);
+}
+
+/* Proportional figures for big standalone numbers; only table/axis
+   figures opt into tabular-nums via the .figures-tabular class. */
+.figures-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Shared card elevation - see --shadow-card above for the light/dark logic. */
+.card-shadow {
+  box-shadow: var(--shadow-card);
+}
+
+/* A soft fade at the right edge of a horizontally-scrollable table - the
+   only visible hint on many mobile browsers that there's more to see,
+   since the scrollbar itself stays hidden until the user starts dragging. */
+.scroll-fade-x {
+  mask-image: linear-gradient(to right, black calc(100% - 28px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 28px), transparent 100%);
+}
+
+/* Visible keyboard focus on every interactive element — Tailwind's
+   preflight resets the browser default, so this restores it deliberately
+   rather than leaving keyboard users with no focus indicator. */
+a:focus-visible,
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-series-1);
+  outline-offset: 2px;
+  border-radius: 4px;
+}

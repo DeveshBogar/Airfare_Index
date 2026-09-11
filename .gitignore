@@ -1,0 +1,20 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Data (kept locally; reference CSV + raw snapshots are the audit trail
+# and can be large — see data/reference/README.md for how to regenerate)
+data/airfare.db
+data/airfare.db-wal
+data/airfare.db-shm
+data/scrape.lock
+data/raw/*.jsonl
+
+# Editors / OS
+.DS_Store
