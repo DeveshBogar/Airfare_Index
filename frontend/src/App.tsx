@@ -5,6 +5,8 @@ import {
   type AffordabilityReport,
   type BacktestReport,
   type BookingAdvice as BookingAdviceData,
+  type ByCarrierIndex,
+  type CarrierFinancialContext as CarrierFinancialContextData,
   type ComplianceStatus,
   type CoverageReport,
   type CpiDivergence as CpiDivergenceData,
@@ -19,6 +21,8 @@ import {
 } from "./api";
 import { Affordability } from "./components/Affordability";
 import { BookingAdvice } from "./components/BookingAdvice";
+import { CarrierFinancialContext } from "./components/CarrierFinancialContext";
+import { CarrierIndexChart } from "./components/CarrierIndexChart";
 import { CpiDivergence } from "./components/CpiDivergence";
 import { DataSources } from "./components/DataSources";
 import { DateWatch } from "./components/DateWatch";
@@ -56,6 +60,7 @@ interface DashboardData {
   spikeWatch: SpikeWatchData;
   cpiDivergence: CpiDivergenceData;
   affordability: AffordabilityReport;
+  byCarrierIndex: ByCarrierIndex;
 }
 
 function TabPanel({ tabKey, active, children }: { tabKey: TabKey; active: TabKey; children: ReactNode }) {
@@ -87,24 +92,38 @@ function App() {
   const [routeDataLoading, setRouteDataLoading] = useState(false);
   const [news, setNews] = useState<News | null>(null);
   const [newsLoading, setNewsLoading] = useState(true);
+  const [financialContext, setFinancialContext] = useState<CarrierFinancialContextData[] | null>(null);
 
   async function load() {
     setRefreshing(true);
     try {
-      const [routes, daily, backtest, compliance, coverage, elasticity, priceGrid, fares, spikeWatch, cpiDivergence, affordability] =
-        await Promise.all([
-          api.routes(),
-          api.indexDaily(),
-          api.backtest(),
-          api.compliance(),
-          api.coverage(),
-          api.elasticity(),
-          api.priceGrid(),
-          api.fares(),
-          api.spikeWatch(),
-          api.cpiDivergence(),
-          api.affordability(),
-        ]);
+      const [
+        routes,
+        daily,
+        backtest,
+        compliance,
+        coverage,
+        elasticity,
+        priceGrid,
+        fares,
+        spikeWatch,
+        cpiDivergence,
+        affordability,
+        byCarrierIndex,
+      ] = await Promise.all([
+        api.routes(),
+        api.indexDaily(),
+        api.backtest(),
+        api.compliance(),
+        api.coverage(),
+        api.elasticity(),
+        api.priceGrid(),
+        api.fares(),
+        api.spikeWatch(),
+        api.cpiDivergence(),
+        api.affordability(),
+        api.indexByCarrier(),
+      ]);
       setData({
         routes,
         daily,
@@ -117,6 +136,7 @@ function App() {
         spikeWatch,
         cpiDivergence,
         affordability,
+        byCarrierIndex,
       });
       setError(null);
     } catch (e) {
@@ -142,6 +162,18 @@ function App() {
       .then(setNews)
       .catch(() => setNews(null))
       .finally(() => setNewsLoading(false));
+  }, []);
+
+  useEffect(() => {
+    // Also fetched once, not on the 60s poll: these are quarterly filings
+    // that change at most 4 times a year, and every request re-checks a
+    // live compliance gate against each carrier's investor-relations page
+    // (see app.index.financial_context) — no reason to repeat that every
+    // minute for data this slow-moving.
+    api
+      .carriersFinancialContext()
+      .then(setFinancialContext)
+      .catch(() => setFinancialContext(null));
   }, []);
 
   useEffect(() => {
@@ -215,6 +247,8 @@ function App() {
               <CpiDivergence data={data.cpiDivergence} />
               <KpiCards backtest={data.backtest} coverage={data.coverage} />
               <TrendChart data={data.daily} />
+              <CarrierIndexChart data={data.byCarrierIndex} />
+              <CarrierFinancialContext data={financialContext} />
               <NewsFeed news={news} loading={newsLoading} />
               <Footer backtest={data.backtest} coverage={data.coverage} />
             </TabPanel>

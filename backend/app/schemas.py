@@ -255,6 +255,55 @@ class NewsOut(BaseModel):
     sources_checked: list[NewsSourceCheckOut]
 
 
+class CarrierIndexPointOut(BaseModel):
+    date: dt.date
+    laspeyres: float
+    paasche: float
+    fisher: float
+    sample_size: int
+    routes_covered: int
+
+
+class CarrierIndexSeriesOut(BaseModel):
+    carrier_code: str
+    carrier_name: str
+    carrier_weight: float
+    points: list[CarrierIndexPointOut]
+
+
+class ByCarrierIndexOut(BaseModel):
+    headline: list[IndexPointOut]
+    carriers: list[CarrierIndexSeriesOut]
+
+
+class CarrierFinancialQuarterOut(BaseModel):
+    quarter_label: str
+    period_start: dt.date
+    period_end: dt.date
+    revenue_cr: float
+    net_profit_cr: float
+    net_margin_pct: float
+    filing_date: dt.date
+    source_url: str
+    source_note: str
+
+
+class InvestorRelationsComplianceOut(BaseModel):
+    domain: str
+    path: str
+    allowed: bool
+    reason: str
+
+
+class CarrierFinancialContextOut(BaseModel):
+    carrier_code: str
+    carrier_name: str
+    available: bool
+    reason: str | None = None
+    quarters: list[CarrierFinancialQuarterOut]
+    compliance: InvestorRelationsComplianceOut | None = None
+
+
 class RoutePriceHistoryOut(BaseModel):
     route: str
     days_of_history: int

@@ -144,3 +144,29 @@ def test_date_watch_endpoint_rejects_a_past_travel_date(client):
     yesterday = (dt.date.today() - dt.timedelta(days=1)).isoformat()
     resp = client.get(f"/api/date-watch?route_id=1&travel_date={yesterday}")
     assert resp.status_code == 400
+
+
+def test_index_by_carrier_endpoint_ok_before_any_carrier_index_is_built(client):
+    # No CarrierIndexValue rows exist yet in this fresh test DB -> the
+    # endpoint should respond with empty series, not error.
+    resp = client.get("/api/index/by-carrier")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["headline"] == []
+    assert body["carriers"] == []
+
+
+def test_carriers_financial_context_endpoint_covers_every_known_carrier(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.scraper.compliance.requests.get",
+        lambda *a, **k: type("R", (), {"status_code": 200, "text": "User-agent: *\nAllow: /\n"})(),
+    )
+    resp = client.get("/api/carriers/financial-context")
+    assert resp.status_code == 200
+    body = resp.json()
+    by_code = {row["carrier_code"]: row for row in body}
+    assert by_code["SG"]["available"] is True
+    assert len(by_code["SG"]["quarters"]) > 0
+    assert by_code["SG"]["carrier_name"] == "SpiceJet"
+    assert by_code["QP"]["available"] is False
+    assert "privately held" in by_code["QP"]["reason"].lower()

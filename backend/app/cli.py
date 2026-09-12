@@ -24,6 +24,7 @@ from app.config import DGCA_TRAFFIC_CSV, ROUTE_BASKET
 from app.data_quality import validate_data
 from app.db.models import FareQuote, Route, RouteWeight
 from app.db.session import get_session, init_db
+from app.index.carrier_index import run_carrier_index_construction
 from app.index.construct import run_index_construction
 from app.index.weights import compute_route_weights, top_traffic_routes
 from app.lockfile import ScrapeAlreadyRunning, scrape_lock
@@ -86,6 +87,11 @@ def build_index() -> None:
                 f"paasche={row['paasche']:.2f}  fisher={row['fisher']:.2f}  "
                 f"(n={row['sample_size']}, routes={row['routes_covered']})"
             )
+
+        by_carrier = run_carrier_index_construction(session)
+        for carrier_code, carrier_series in by_carrier.items():
+            weight = carrier_series[-1]["carrier_weight"] if carrier_series else 0.0
+            print(f"computed {len(carrier_series)} day(s) of {carrier_code} index values (weight={weight:.3f})")
 
 
 def rank_routes(n: int = 25) -> None:

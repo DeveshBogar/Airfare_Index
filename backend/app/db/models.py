@@ -132,6 +132,57 @@ class IndexValue(Base):
     computed_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 
+class CarrierIndexValue(Base):
+    """A computed per-carrier Airfare Price Index value — same shape as
+    IndexValue, scoped to one carrier's own fares (app.index.carrier_index).
+    `carrier_weight` is that carrier's share of the blended headline index
+    on this date (see carrier_index.py's docstring for exactly what that
+    weight does and does not represent)."""
+
+    __tablename__ = "carrier_index_values"
+    __table_args__ = (
+        UniqueConstraint("carrier_code", "date", "frequency", "method", name="uq_carrier_index_period_method"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    carrier_code: Mapped[str] = mapped_column(ForeignKey("carriers.code"))
+    date: Mapped[dt.date] = mapped_column(DateTime)
+    frequency: Mapped[str] = mapped_column(String(8))  # daily|weekly|monthly
+    method: Mapped[str] = mapped_column(String(16))  # laspeyres|paasche|fisher
+    value: Mapped[float] = mapped_column(Float)  # index value, base period = 100
+    carrier_weight: Mapped[float] = mapped_column(Float)  # this carrier's share of the blended index, 0-1
+    sample_size: Mapped[int] = mapped_column(Integer)
+    routes_covered: Mapped[int] = mapped_column(Integer)
+    computed_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+    carrier: Mapped["Carrier"] = relationship()
+
+
+class CarrierFinancialResult(Base):
+    """One carrier's publicly disclosed quarterly result — see
+    app.index.financial_context for the sourced reference data this table
+    is seeded from and the non-negotiable rule that nothing derived from
+    it may output a fairness/justification verdict."""
+
+    __tablename__ = "carrier_financial_results"
+    __table_args__ = (
+        UniqueConstraint("carrier_code", "quarter_label", name="uq_carrier_financial_quarter"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    carrier_code: Mapped[str] = mapped_column(ForeignKey("carriers.code"))
+    quarter_label: Mapped[str] = mapped_column(String(16))  # e.g. "Q1 FY26"
+    period_start: Mapped[dt.date] = mapped_column(DateTime)
+    period_end: Mapped[dt.date] = mapped_column(DateTime)
+    revenue_cr: Mapped[float] = mapped_column(Float)  # revenue from operations, INR crore, consolidated
+    net_profit_cr: Mapped[float] = mapped_column(Float)  # net profit(+)/loss(-), INR crore, consolidated
+    filing_date: Mapped[dt.date] = mapped_column(DateTime)
+    source_url: Mapped[str] = mapped_column(String(512))
+    source_note: Mapped[str] = mapped_column(String(1024))
+
+    carrier: Mapped["Carrier"] = relationship()
+
+
 class ComplianceLog(Base):
     """Every robots.txt compliance decision the gate makes, for audit."""
 

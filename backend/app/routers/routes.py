@@ -7,11 +7,19 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import AP_WINDOWS, ROUTE_BASKET, SOURCE_REGISTRY
-from app.db.models import ComplianceLog, FareQuote, Route, RouteWeight
+from app.db.models import Carrier, ComplianceLog, FareQuote, Route, RouteWeight
 from app.db.session import get_session
 from app.index.affordability import basket_affordability
+from app.index.financial_context import ALL_KNOWN_CARRIER_CODES, all_financial_context
 from app.index.spike_watch import basket_spike_watch, festival_route_prices
-from app.schemas import AffordabilityReportOut, ComplianceStatusOut, FestivalRoutePricesOut, RouteOut, SpikeWatchOut
+from app.schemas import (
+    AffordabilityReportOut,
+    CarrierFinancialContextOut,
+    ComplianceStatusOut,
+    FestivalRoutePricesOut,
+    RouteOut,
+    SpikeWatchOut,
+)
 
 router = APIRouter(prefix="/api", tags=["routes"])
 
@@ -116,6 +124,27 @@ def spike_watch_route_prices(window_key: str, session: Session = Depends(_sessio
     if result is None:
         raise HTTPException(status_code=404, detail=f"unknown window_key: {window_key}")
     return FestivalRoutePricesOut(**result)
+
+
+@router.get("/carriers/financial-context", response_model=list[CarrierFinancialContextOut])
+def carriers_financial_context(session: Session = Depends(_session)) -> list[CarrierFinancialContextOut]:
+    """Publicly disclosed quarterly revenue/profit for every carrier this
+    project knows about — real, dated, sourced figures for SpiceJet and
+    IndiGo (the two NSE/BSE-listed carriers), an honest "not available"
+    reason for the rest. See app.index.financial_context for the sourced
+    reference data and docs/financial_context_methodology.md for why this
+    is correlation context, never a fairness verdict."""
+    carrier_names = {c.code: c.name for c in session.execute(select(Carrier)).scalars().all()}
+    source_names = {info.carrier_code: info.name for info in SOURCE_REGISTRY.values() if info.carrier_code}
+
+    contexts = all_financial_context(ALL_KNOWN_CARRIER_CODES)
+    return [
+        CarrierFinancialContextOut(
+            carrier_name=carrier_names.get(ctx["carrier_code"]) or source_names.get(ctx["carrier_code"], ctx["carrier_code"]),
+            **ctx,
+        )
+        for ctx in contexts
+    ]
 
 
 @router.get("/affordability", response_model=AffordabilityReportOut)

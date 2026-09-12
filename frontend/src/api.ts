@@ -294,6 +294,55 @@ export interface News {
   sources_checked: NewsSourceCheck[];
 }
 
+export interface CarrierIndexPoint {
+  date: string;
+  laspeyres: number;
+  paasche: number;
+  fisher: number;
+  sample_size: number;
+  routes_covered: number;
+}
+
+export interface CarrierIndexSeries {
+  carrier_code: string;
+  carrier_name: string;
+  carrier_weight: number;
+  points: CarrierIndexPoint[];
+}
+
+export interface ByCarrierIndex {
+  headline: IndexDailyPoint[];
+  carriers: CarrierIndexSeries[];
+}
+
+export interface CarrierFinancialQuarter {
+  quarter_label: string;
+  period_start: string;
+  period_end: string;
+  revenue_cr: number;
+  net_profit_cr: number;
+  net_margin_pct: number;
+  filing_date: string;
+  source_url: string;
+  source_note: string;
+}
+
+export interface InvestorRelationsCompliance {
+  domain: string;
+  path: string;
+  allowed: boolean;
+  reason: string;
+}
+
+export interface CarrierFinancialContext {
+  carrier_code: string;
+  carrier_name: string;
+  available: boolean;
+  reason: string | null;
+  quarters: CarrierFinancialQuarter[];
+  compliance: InvestorRelationsCompliance | null;
+}
+
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
@@ -320,4 +369,6 @@ export const api = {
   priceGrid: () => getJSON<PriceGrid>("/price-grid"),
   fares: () => getJSON<FareQuote[]>("/fares?limit=300"),
   news: () => getJSON<News>("/news"),
+  indexByCarrier: () => getJSON<ByCarrierIndex>("/index/by-carrier"),
+  carriersFinancialContext: () => getJSON<CarrierFinancialContext[]>("/carriers/financial-context"),
 };

@@ -42,13 +42,23 @@ from app.index.weights import compute_route_weights
 BASE_INDEX_VALUE = 100.0
 
 
-def cheapest_by_route_day(session: Session) -> dict[tuple[int, dt.date], float]:
+def cheapest_by_route_day(
+    session: Session, carrier_code: str | None = None
+) -> dict[tuple[int, dt.date], float]:
+    """The whole-market cheapest fare per (route, day), or — when
+    `carrier_code` is given — that one carrier's own cheapest fare per
+    (route, day). Same non-outlier/non-sold-out real-price rule either
+    way; see app.index.carrier_index for why a carrier-scoped call of
+    this exists at all."""
+    conditions = [
+        FareQuote.is_outlier.is_(False),
+        FareQuote.sold_out.is_(False),
+        FareQuote.total_fare.is_not(None),
+    ]
+    if carrier_code is not None:
+        conditions.append(FareQuote.carrier_code == carrier_code)
     rows = session.execute(
-        select(FareQuote.route_id, FareQuote.search_date, FareQuote.total_fare).where(
-            FareQuote.is_outlier.is_(False),
-            FareQuote.sold_out.is_(False),
-            FareQuote.total_fare.is_not(None),
-        )
+        select(FareQuote.route_id, FareQuote.search_date, FareQuote.total_fare).where(*conditions)
     ).all()
     best: dict[tuple[int, dt.date], float] = {}
     for route_id, search_date, total_fare in rows:
@@ -59,11 +69,16 @@ def cheapest_by_route_day(session: Session) -> dict[tuple[int, dt.date], float]:
     return best
 
 
-def compute_index_series(session: Session) -> list[dict]:
+def compute_index_series(session: Session, carrier_code: str | None = None) -> list[dict]:
     """Returns one dict per day with laspeyres/paasche/fisher values
     (base day = 100), sample_size, and routes_covered. Empty list if there
-    isn't at least one day of real data yet."""
-    cheapest = cheapest_by_route_day(session)
+    isn't at least one day of real data yet.
+
+    `carrier_code` scopes every step (the cheapest-price lookup, the base
+    day, the weights) to that one carrier's own fares — see
+    app.index.carrier_index, which is the only caller that passes it. The
+    default (None) is the original whole-market headline index, unchanged."""
+    cheapest = cheapest_by_route_day(session, carrier_code=carrier_code)
     if not cheapest:
         return []
 
