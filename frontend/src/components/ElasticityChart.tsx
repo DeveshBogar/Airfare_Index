@@ -68,9 +68,35 @@ export function ElasticityChart({ data, routeFilter }: { data: ElasticityPoint[]
           <ComposedChart data={chartData} margin={{ top: 8, right: 16, bottom: 0, left: -16 }}>
             <CartesianGrid stroke="var(--color-hairline)" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 12, fill: "var(--color-ink-muted)" }} axisLine={{ stroke: "var(--color-axis)" }} tickLine={false} />
-            <YAxis tick={{ fontSize: 12, fill: "var(--color-ink-muted)" }} axisLine={false} tickLine={false} />
+            {/* Two Y axes on purpose: the bar (highest price seen) has to
+                start at 0 to read honestly as a bar, but sharing that same
+                0-based scale flattened the average-price line into a barely-
+                moving smudge near the bottom - the real day-to-day swings in
+                the average were only a few hundred rupees against a ~20,000
+                axis. The line gets its own tightly-zoomed axis so its actual
+                shape (the whole point of "book early, pay less") is visible,
+                without changing a single underlying number. */}
+            <YAxis
+              yAxisId="bars"
+              tick={{ fontSize: 12, fill: "var(--color-ink-muted)" }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v) => formatINR(Number(v))}
+              width={64}
+            />
+            <YAxis
+              yAxisId="line"
+              orientation="right"
+              domain={["auto", "auto"]}
+              tick={{ fontSize: 12, fill: "var(--color-series-1)" }}
+              axisLine={false}
+              tickLine={false}
+              tickFormatter={(v) => formatINR(Number(v))}
+              width={64}
+            />
             <Tooltip content={<ElasticityTooltip />} />
             <Bar
+              yAxisId="bars"
               dataKey="max_fare"
               name="Highest price seen"
               fill="color-mix(in oklab, var(--color-series-1) 15%, transparent)"
@@ -78,6 +104,7 @@ export function ElasticityChart({ data, routeFilter }: { data: ElasticityPoint[]
               barSize={28}
             />
             <Line
+              yAxisId="line"
               type="monotone"
               dataKey="mean_fare"
               name="Average cheapest price"
