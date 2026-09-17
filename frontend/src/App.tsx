@@ -7,6 +7,7 @@ import {
   type BookingAdvice as BookingAdviceData,
   type ByCarrierIndex,
   type CarrierFinancialContext as CarrierFinancialContextData,
+  type CitizenReportCount,
   type ComplianceStatus,
   type CoverageReport,
   type CpiDivergence as CpiDivergenceData,
@@ -15,14 +16,17 @@ import {
   type IndexDailyPoint,
   type News,
   type PriceGrid,
+  type RegulatorFlag,
   type RouteOut,
   type RoutePriceHistory,
   type SpikeWatch as SpikeWatchData,
 } from "./api";
+import { getRegulatorToken } from "./regulatorAuth";
 import { Affordability } from "./components/Affordability";
 import { BookingAdvice } from "./components/BookingAdvice";
 import { CarrierFinancialContext } from "./components/CarrierFinancialContext";
 import { CarrierIndexChart } from "./components/CarrierIndexChart";
+import { CitizenReportForm } from "./components/CitizenReportForm";
 import { CpiDivergence } from "./components/CpiDivergence";
 import { DataSources } from "./components/DataSources";
 import { DateWatch } from "./components/DateWatch";
@@ -37,6 +41,8 @@ import { LoadingSkeleton } from "./components/LoadingSkeleton";
 import { NewsFeed } from "./components/NewsFeed";
 import { PageSummary } from "./components/PageSummary";
 import { PriceHistory } from "./components/PriceHistory";
+import { RegulatorFlags } from "./components/RegulatorFlags";
+import { RegulatorTokenGate } from "./components/RegulatorTokenGate";
 import { RouteFilter } from "./components/RouteFilter";
 import { SectorHeatmap } from "./components/SectorHeatmap";
 import { SpikeWatch } from "./components/SpikeWatch";
@@ -93,6 +99,10 @@ function App() {
   const [news, setNews] = useState<News | null>(null);
   const [newsLoading, setNewsLoading] = useState(true);
   const [financialContext, setFinancialContext] = useState<CarrierFinancialContextData[] | null>(null);
+  const [flags, setFlags] = useState<RegulatorFlag[] | null>(null);
+  const [flagsLoading, setFlagsLoading] = useState(false);
+  const [reportCount, setReportCount] = useState<CitizenReportCount | null>(null);
+  const [regulatorToken, setRegulatorTokenState] = useState<string | null>(getRegulatorToken());
 
   async function load() {
     setRefreshing(true);
@@ -175,6 +185,29 @@ function App() {
       .then(setFinancialContext)
       .catch(() => setFinancialContext(null));
   }, []);
+
+  function loadRegulatorData() {
+    setFlagsLoading(true);
+    api
+      .regulatorFlags()
+      .then(setFlags)
+      .catch(() => setFlags(null))
+      .finally(() => setFlagsLoading(false));
+    api
+      .citizenReportCount()
+      .then(setReportCount)
+      .catch(() => setReportCount(null));
+  }
+
+  useEffect(() => {
+    // Lazy: only fetched once the Regulator tab is actually opened, and not
+    // added to the 60s poll — most visitors never open it, and flags only
+    // change when the daily detection run writes new ones.
+    if (activeTab === "regulator" && flags === null && !flagsLoading) {
+      loadRegulatorData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   useEffect(() => {
     if (routeFilterId == null) {
@@ -272,6 +305,30 @@ function App() {
 
             <TabPanel tabKey="affordability" active={activeTab}>
               <Affordability data={data.affordability} />
+            </TabPanel>
+
+            <TabPanel tabKey="regulator" active={activeTab}>
+              <section className="card-shadow rounded-2xl border border-border bg-surface p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-[15px] font-semibold text-ink">Regulator view</h2>
+                  <p className="text-sm text-ink-secondary mt-0.5 max-w-3xl leading-relaxed">
+                    Monitoring and evidence, not enforcement. This view flags real fares that ran unusually high
+                    against their own history and assembles the real, dated context behind them. It issues nothing
+                    and sends nothing to any airline — any action is a human's decision, taken through official
+                    channels.
+                  </p>
+                </div>
+                <RegulatorTokenGate onChange={setRegulatorTokenState} />
+              </section>
+
+              <RegulatorFlags
+                flags={flags}
+                loading={flagsLoading}
+                hasToken={regulatorToken != null}
+                onReviewed={loadRegulatorData}
+              />
+
+              <CitizenReportForm count={reportCount} onSubmitted={loadRegulatorData} />
             </TabPanel>
 
             <TabPanel tabKey="sources" active={activeTab}>

@@ -174,6 +174,43 @@ body {
   -webkit-mask-image: linear-gradient(to right, black calc(100% - 28px), transparent 100%);
 }
 
+/* Printing a draft fare-review notice (DraftNoticeView) should produce the
+   document and nothing else — not the dashboard around it. Hiding the rest
+   of the page rather than opening a separate print route keeps the notice
+   from ever being reachable at its own URL, which matters here: the
+   document carries a DRAFT disclaimer precisely because it must not
+   circulate as though it were an issued finding. */
+@media print {
+  /* visibility, not display: a display:none ancestor can't be overridden by
+     a descendant, but visibility:hidden can be — so the notice re-shows
+     while everything around it stays blank. */
+  body:has(.draft-notice-printable) * {
+    visibility: hidden;
+  }
+  body:has(.draft-notice-printable) .draft-notice-printable,
+  body:has(.draft-notice-printable) .draft-notice-printable * {
+    visibility: visible;
+  }
+  body:has(.draft-notice-printable) .draft-notice-printable {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+  }
+  .draft-notice-printable,
+  .draft-notice-printable * {
+    color: #000 !important;
+    background: transparent !important;
+  }
+  .draft-notice-printable a::after {
+    /* A printed page can't be clicked — print the destination instead. */
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    word-break: break-all;
+  }
+}
+
 /* Visible keyboard focus on every interactive element — Tailwind's
    preflight resets the browser default, so this restores it deliberately
    rather than leaving keyboard users with no focus indicator. */

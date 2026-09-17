@@ -304,6 +304,92 @@ class CarrierFinancialContextOut(BaseModel):
     compliance: InvestorRelationsComplianceOut | None = None
 
 
+class RegulatorFlagOut(BaseModel):
+    id: int
+    route: str
+    route_id: int
+    carrier_code: str
+    carrier_name: str
+    ap_window_days: int
+    flagged_search_date: dt.date
+    flagged_travel_date: dt.date
+    observed_fare: float
+    baseline_median_fare: float
+    baseline_mad: float
+    robust_z_score: float
+    pct_above_baseline_median: float
+    baseline_sample_size: int
+    status: str
+    review_note: str
+    reviewed_by: str
+    reviewed_at: dt.datetime | None = None
+    detected_at: dt.datetime
+
+
+class RegulatorFlagDetailOut(RegulatorFlagOut):
+    # Heterogeneous by design — each item is keyed by its own factor_type
+    # (festival window / news item / carrier financials) and carries that
+    # type's own real fields. Forcing one Pydantic shape over three
+    # genuinely different real sources would either flatten them or invent
+    # empty fields; index_daily/index_by_carrier already return natural
+    # dict shapes for the same reason.
+    possible_factors: list[dict]
+
+
+class RegulatorFlagReviewIn(BaseModel):
+    status: str  # reviewed|dismissed — validated against ALLOWED_REVIEW_STATUSES
+    review_note: str = ""
+    reviewed_by: str = ""
+
+
+class DraftNoticeOut(BaseModel):
+    document_type: str
+    draft_disclaimer: str
+    flag_id: int
+    subject: dict
+    observation: dict
+    detection_method_note: str
+    possible_factors: list[dict]
+    regulator_review: dict
+    boundary_notice: str
+
+
+class CitizenFareReportIn(BaseModel):
+    origin: str
+    destination: str
+    travel_date: dt.date
+    reported_fare: float
+    carrier_name: str = ""
+    note: str = ""
+    contact_email: str = ""
+
+
+class CitizenFareReportOut(BaseModel):
+    id: int
+    origin: str
+    destination: str
+    travel_date: dt.date
+    reported_fare: float
+    carrier_name: str
+    note: str
+    contact_email: str
+    submitted_at: dt.datetime
+    status: str
+    reviewer_note: str
+    reviewed_at: dt.datetime | None = None
+
+
+class CitizenReportReviewIn(BaseModel):
+    status: str  # reviewed
+    reviewer_note: str = ""
+
+
+class CitizenReportCountOut(BaseModel):
+    total: int
+    new: int
+    reviewed: int
+
+
 class RoutePriceHistoryOut(BaseModel):
     route: str
     days_of_history: int

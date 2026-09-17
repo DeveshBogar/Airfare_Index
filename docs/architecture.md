@@ -94,6 +94,13 @@ backend/app/
                          bounds — the one place tunable policy constants live
   lockfile.py            advisory file lock guarding concurrent scrapes
   db/                   models.py (ORM), session.py (WAL + busy_timeout)
+  regulator/
+    auth.py              shared-token gate for the regulator surface (fails
+                           closed; prototype-grade, not identity — see
+                           docs/regulator_flagging_methodology.md)
+    notice_draft.py      builds a DRAFT evidence document for one flag.
+                           Produces documents only; nothing in this package
+                           sends anything to anyone, by design
   scraper/
     compliance.py        robots.txt gate (wildcard-aware, fails closed)
     ratelimit.py          per-domain token bucket

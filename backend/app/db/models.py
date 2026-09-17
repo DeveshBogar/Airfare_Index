@@ -183,6 +183,90 @@ class CarrierFinancialResult(Base):
     carrier: Mapped["Carrier"] = relationship()
 
 
+class RegulatorFareFlag(Base):
+    """One statistically elevated real fare, flagged for a human regulator to
+    look at — see app.index.anomaly_detection for the detection method and
+    docs/regulator_flagging_methodology.md for the hard boundary on what a
+    flag is (real data plus a statistical annotation) and is NOT (a finding
+    of wrongdoing, a fairness verdict, or any kind of issued notice).
+
+    `status` is deliberately limited to new|reviewed|dismissed. There is no
+    "sent" state, because nothing in this system sends anything to anyone —
+    a draft notice is generated for a human to act on through their own
+    official channels, never dispatched from here."""
+
+    __tablename__ = "regulator_fare_flags"
+    __table_args__ = (
+        UniqueConstraint(
+            "route_id",
+            "carrier_code",
+            "ap_window_days",
+            "flagged_search_date",
+            name="uq_regulator_flag_group_day",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    route_id: Mapped[int] = mapped_column(ForeignKey("routes.id"))
+    carrier_code: Mapped[str] = mapped_column(ForeignKey("carriers.code"))
+    ap_window_days: Mapped[int] = mapped_column(Integer)
+
+    flagged_search_date: Mapped[dt.date] = mapped_column(DateTime)  # day the fare was observed
+    flagged_travel_date: Mapped[dt.date] = mapped_column(DateTime)  # departure date it priced
+    fare_quote_id: Mapped[int | None] = mapped_column(ForeignKey("fare_quotes.id"), nullable=True)
+
+    observed_fare: Mapped[float] = mapped_column(Float)
+    baseline_median_fare: Mapped[float] = mapped_column(Float)
+    baseline_mad: Mapped[float] = mapped_column(Float)  # median absolute deviation
+    robust_z_score: Mapped[float] = mapped_column(Float)
+    pct_above_baseline_median: Mapped[float] = mapped_column(Float)
+    baseline_sample_size: Mapped[int] = mapped_column(Integer)  # real days behind the baseline
+
+    status: Mapped[str] = mapped_column(String(16), default="new")  # new|reviewed|dismissed
+    review_note: Mapped[str] = mapped_column(String(2048), default="")
+    # A free-text label the reviewer types in. NOT an authenticated identity —
+    # see app.regulator.auth, which is a single shared token, not a login.
+    reviewed_by: Mapped[str] = mapped_column(String(128), default="")
+    reviewed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    detected_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+    route: Mapped["Route"] = relationship()
+    carrier: Mapped["Carrier"] = relationship()
+    fare_quote: Mapped["FareQuote | None"] = relationship()
+
+
+class CitizenFareReport(Base):
+    """An unverified fare report submitted by a member of the public.
+
+    Deliberately has no foreign key or any other join path to
+    RegulatorFareFlag: these are self-reported and unverified, while a
+    RegulatorFareFlag is derived from this project's own collected real
+    data. Blending the two would let an unverified claim inherit the
+    credibility of verified data, which is exactly what this project's
+    real-data-only rule exists to prevent. Origin/destination are stored as
+    free text rather than a Route foreign key for the same reason — a
+    citizen types what they typed, it is not resolved into the tracked
+    basket as though it were a real observation.
+
+    `contact_email` is the only PII field and is optional."""
+
+    __tablename__ = "citizen_fare_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    origin: Mapped[str] = mapped_column(String(64))
+    destination: Mapped[str] = mapped_column(String(64))
+    travel_date: Mapped[dt.date] = mapped_column(DateTime)
+    reported_fare: Mapped[float] = mapped_column(Float)
+    carrier_name: Mapped[str] = mapped_column(String(64), default="")
+    note: Mapped[str] = mapped_column(String(1024), default="")
+    contact_email: Mapped[str] = mapped_column(String(256), default="")
+    submitted_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+    status: Mapped[str] = mapped_column(String(16), default="new")  # new|reviewed
+    reviewer_note: Mapped[str] = mapped_column(String(2048), default="")
+    reviewed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ComplianceLog(Base):
     """Every robots.txt compliance decision the gate makes, for audit."""
 

@@ -3,6 +3,7 @@
     python -m app.cli seed-dgca-weights     # (re)compute + persist route weights from the DGCA CSV
     python -m app.cli run-once              # one scrape cycle across every registered source
     python -m app.cli build-index           # (re)compute the index from whatever fare data exists
+    python -m app.cli detect-anomalies      # flag statistically elevated real fares (--backfill for all history)
     python -m app.cli backtest              # print the current back-test report
     python -m app.cli rank-routes           # print the top-N routes by real DGCA traffic
     python -m app.cli merge-duplicate-routes  # one-time cleanup for direction-fragmented routes
@@ -19,11 +20,14 @@ import asyncio
 import datetime as dt
 import json
 
+from sqlalchemy import select
+
 from app.backtest.run_backtest import backtest_report
 from app.config import DGCA_TRAFFIC_CSV, ROUTE_BASKET
 from app.data_quality import validate_data
 from app.db.models import FareQuote, Route, RouteWeight
 from app.db.session import get_session, init_db
+from app.index.anomaly_detection import detect_all_anomalies, persist_anomaly_flags, run_anomaly_detection
 from app.index.carrier_index import run_carrier_index_construction
 from app.index.construct import run_index_construction
 from app.index.weights import compute_route_weights, top_traffic_routes
@@ -92,6 +96,41 @@ def build_index() -> None:
         for carrier_code, carrier_series in by_carrier.items():
             weight = carrier_series[-1]["carrier_weight"] if carrier_series else 0.0
             print(f"computed {len(carrier_series)} day(s) of {carrier_code} index values (weight={weight:.3f})")
+
+        # Runs on the same single daily trigger as the index itself rather
+        # than a second scheduler — see docs/architecture.md on why this
+        # project keeps exactly one source of truth for scheduled work.
+        flagged = run_anomaly_detection(session)
+        print(f"anomaly detection: {flagged} new flag(s)")
+
+
+def detect_anomalies(backfill: bool = False) -> None:
+    """Flags real fares that are statistically elevated against their own
+    route+carrier+booking-window history (see app.index.anomaly_detection).
+
+    Normal mode tests only each group's most recent real day — the daily
+    question, "is today unusual?". `--backfill` walks every historical day
+    instead, so history collected before this feature existed still gets
+    assessed rather than silently skipped. Both are idempotent: a group-day
+    that already has a flag is never duplicated, and an existing flag's
+    review status is never overwritten."""
+    init_db()
+    with get_session() as session:
+        if not backfill:
+            written = run_anomaly_detection(session)
+            print(f"anomaly detection: {written} new flag(s)")
+            return
+
+        days = sorted(
+            {
+                (d.date() if hasattr(d, "date") else d)
+                for (d,) in session.execute(select(FareQuote.search_date)).all()
+            }
+        )
+        total = 0
+        for day in days:
+            total += persist_anomaly_flags(session, detect_all_anomalies(session, as_of=day))
+        print(f"anomaly detection (backfill over {len(days)} real day(s)): {total} new flag(s)")
 
 
 def rank_routes(n: int = 25) -> None:
@@ -185,6 +224,8 @@ def main() -> None:
     p_run = sub.add_parser("run-once")
     p_run.add_argument("--sources", nargs="*", default=None)
     sub.add_parser("build-index")
+    p_anomalies = sub.add_parser("detect-anomalies")
+    p_anomalies.add_argument("--backfill", action="store_true", default=False)
     sub.add_parser("backtest")
     p_rank = sub.add_parser("rank-routes")
     p_rank.add_argument("--n", type=int, default=25)
@@ -198,6 +239,8 @@ def main() -> None:
         run_once(args.sources)
     elif args.command == "build-index":
         build_index()
+    elif args.command == "detect-anomalies":
+        detect_anomalies(backfill=args.backfill)
     elif args.command == "backtest":
         backtest()
     elif args.command == "rank-routes":

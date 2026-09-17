@@ -1,6 +1,13 @@
 import type { ReactNode } from "react";
 
-export type TabKey = "overview" | "trip" | "festivals" | "routes" | "affordability" | "sources";
+export type TabKey =
+  | "overview"
+  | "trip"
+  | "festivals"
+  | "routes"
+  | "affordability"
+  | "regulator"
+  | "sources";
 
 const TABS: { key: TabKey; label: string; icon: ReactNode }[] = [
   {
@@ -47,6 +54,16 @@ const TABS: { key: TabKey; label: string; icon: ReactNode }[] = [
     icon: (
       <>
         <path d="M8 2v12M5.5 4.5h3.75a1.75 1.75 0 1 1 0 3.5H6.75a1.75 1.75 0 1 0 0 3.5H10" strokeLinecap="round" strokeLinejoin="round" />
+      </>
+    ),
+  },
+  {
+    key: "regulator",
+    label: "Regulator View",
+    icon: (
+      <>
+        <path d="M8 2.2l4.5 1.7v4.3c0 2.6-1.8 4.5-4.5 5.6-2.7-1.1-4.5-3-4.5-5.6V3.9z" strokeLinejoin="round" />
+        <path d="M6 8.1l1.4 1.4L10.2 6.6" strokeLinecap="round" strokeLinejoin="round" />
       </>
     ),
   },

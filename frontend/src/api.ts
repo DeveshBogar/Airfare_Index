@@ -1,3 +1,5 @@
+import { getRegulatorToken } from "./regulatorAuth";
+
 const BASE = "/api";
 
 export interface RouteOut {
@@ -343,8 +345,114 @@ export interface CarrierFinancialContext {
   compliance: InvestorRelationsCompliance | null;
 }
 
+export interface RegulatorFlag {
+  id: number;
+  route: string;
+  route_id: number;
+  carrier_code: string;
+  carrier_name: string;
+  ap_window_days: number;
+  flagged_search_date: string;
+  flagged_travel_date: string;
+  observed_fare: number;
+  baseline_median_fare: number;
+  baseline_mad: number;
+  robust_z_score: number;
+  pct_above_baseline_median: number;
+  baseline_sample_size: number;
+  status: "new" | "reviewed" | "dismissed";
+  review_note: string;
+  reviewed_by: string;
+  reviewed_at: string | null;
+  detected_at: string;
+}
+
+// Heterogeneous by design — each factor carries its own type's real fields.
+export type PossibleFactor = { factor_type: string } & Record<string, unknown>;
+
+export interface RegulatorFlagDetail extends RegulatorFlag {
+  possible_factors: PossibleFactor[];
+}
+
+export interface DraftNotice {
+  document_type: string;
+  draft_disclaimer: string;
+  flag_id: number;
+  subject: Record<string, string | number>;
+  observation: Record<string, number | string | null>;
+  detection_method_note: string;
+  possible_factors: PossibleFactor[];
+  regulator_review: Record<string, string | null>;
+  boundary_notice: string;
+}
+
+export interface CitizenFareReport {
+  id: number;
+  origin: string;
+  destination: string;
+  travel_date: string;
+  reported_fare: number;
+  carrier_name: string;
+  note: string;
+  contact_email: string;
+  submitted_at: string;
+  status: string;
+  reviewer_note: string;
+  reviewed_at: string | null;
+}
+
+export interface CitizenFareReportInput {
+  origin: string;
+  destination: string;
+  travel_date: string;
+  reported_fare: number;
+  carrier_name?: string;
+  note?: string;
+  contact_email?: string;
+}
+
+export interface CitizenReportCount {
+  total: number;
+  new: number;
+  reviewed: number;
+}
+
+/** Thrown by the gated regulator calls so the UI can tell "you need a
+ *  token" (401) apart from "the server has none configured" (503) — those
+ *  need very different messages to the person looking at the screen. */
+export class RegulatorAuthError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "RegulatorAuthError";
+    this.status = status;
+  }
+}
+
 async function getJSON<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
+  if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
+  return res.json() as Promise<T>;
+}
+
+async function regulatorFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = getRegulatorToken();
+  const res = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers: {
+      ...(init.body ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { "X-Regulator-Token": token } : {}),
+      ...(init.headers ?? {}),
+    },
+  });
+  if (res.status === 401 || res.status === 503) {
+    const detail = await res
+      .json()
+      .then((b) => (b as { detail?: string }).detail ?? "")
+      .catch(() => "");
+    throw new RegulatorAuthError(res.status, detail || `HTTP ${res.status}`);
+  }
   if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -371,4 +479,41 @@ export const api = {
   news: () => getJSON<News>("/news"),
   indexByCarrier: () => getJSON<ByCarrierIndex>("/index/by-carrier"),
   carriersFinancialContext: () => getJSON<CarrierFinancialContext[]>("/carriers/financial-context"),
+
+  // Regulator surface — flag listing/detail and the citizen-report count
+  // are public (same real data the rest of the dashboard shows); the write
+  // actions, the draft notice, and the raw citizen-report list are gated.
+  regulatorFlags: (statusFilter?: string) =>
+    getJSON<RegulatorFlag[]>(
+      statusFilter ? `/regulator/flags?status_filter=${encodeURIComponent(statusFilter)}` : "/regulator/flags",
+    ),
+  regulatorFlag: (id: number) => getJSON<RegulatorFlagDetail>(`/regulator/flags/${id}`),
+  reviewFlag: (id: number, body: { status: string; review_note: string; reviewed_by: string }) =>
+    regulatorFetch<RegulatorFlag>(`/regulator/flags/${id}/review`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  draftNotice: (id: number) => regulatorFetch<DraftNotice>(`/regulator/flags/${id}/draft-notice`),
+  citizenReportCount: () => getJSON<CitizenReportCount>("/regulator/citizen-reports/count"),
+  submitCitizenReport: (body: CitizenFareReportInput) =>
+    fetch(`${BASE}/regulator/citizen-reports`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then(async (res) => {
+      if (!res.ok) {
+        const detail = await res
+          .json()
+          .then((b) => (b as { detail?: string }).detail ?? "")
+          .catch(() => "");
+        throw new Error(detail || `HTTP ${res.status}`);
+      }
+      return res.json() as Promise<CitizenFareReport>;
+    }),
+  citizenReports: () => regulatorFetch<CitizenFareReport[]>("/regulator/citizen-reports"),
+  reviewCitizenReport: (id: number, body: { status: string; reviewer_note: string }) =>
+    regulatorFetch<CitizenFareReport>(`/regulator/citizen-reports/${id}/review`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
 };

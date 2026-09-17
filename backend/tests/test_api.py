@@ -9,6 +9,12 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.models import Base, Carrier, FareQuote, Route
 
+# The date-watch endpoint only accepts a travel date from today onward, so
+# the seeded quote is anchored to "today + one AP window" rather than a
+# fixed calendar date.
+SEEDED_SEARCH_DATE = dt.date.today()
+SEEDED_TRAVEL_DATE = SEEDED_SEARCH_DATE + dt.timedelta(days=7)
+
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
@@ -22,14 +28,18 @@ def client(tmp_path, monkeypatch):
     seed.add(route)
     seed.add(Carrier(code="SG", name="SpiceJet"))
     seed.commit()
+    # Dates are relative to today, not hardcoded: /api/date-watch rejects a
+    # travel date in the past, so a fixed date silently rots into a failing
+    # test the moment it passes (which is exactly what happened to the
+    # original 2026-09-11 value).
     seed.add(
         FareQuote(
             route_id=route.id,
             carrier_code="SG",
             source_id="spicejet",
             ap_window_days=7,
-            search_date=dt.datetime(2026, 9, 4),
-            travel_date=dt.datetime(2026, 9, 11),
+            search_date=dt.datetime.combine(SEEDED_SEARCH_DATE, dt.time.min),
+            travel_date=dt.datetime.combine(SEEDED_TRAVEL_DATE, dt.time.min),
             fare_class="economy",
             total_fare=7085.0,
             is_outlier=False,
@@ -131,10 +141,11 @@ def test_heatmap_endpoint_ok(client):
 
 def test_date_watch_endpoint_finds_the_seeded_quote(client):
     route_id = client.get("/api/routes").json()[0]["id"]
-    resp = client.get(f"/api/date-watch?route_id={route_id}&travel_date=2026-09-11")
+    travel_date = SEEDED_TRAVEL_DATE.isoformat()
+    resp = client.get(f"/api/date-watch?route_id={route_id}&travel_date={travel_date}")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["travel_date"] == "2026-09-11"
+    assert body["travel_date"] == travel_date
     checkpoint_7 = next(c for c in body["checkpoints"] if c["ap_window_days"] == 7)
     assert checkpoint_7["status"] == "collected"
     assert checkpoint_7["mean_fare"] == 7085.0
