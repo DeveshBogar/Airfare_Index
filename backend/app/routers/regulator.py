@@ -2,25 +2,41 @@
 workflow, draft notice documents, and the public citizen fare-report
 intake.
 
+Access is by role (see app.auth.roles). Everything here except the public
+fare-report intake and its aggregate count requires a signed-in account
+whose role is `regulator`. This replaced a single shared token, and the
+difference matters — a shared secret proved only that the caller held it,
+so every reviewer was indistinguishable from every other one and
+`reviewed_by` could not be more than free text. It now comes from the
+session, which makes the review trail an actual record of who decided what.
+
 Which endpoints are gated, and why:
 
-  - **Flag listing/detail is public.** A flag is this project's own real
-    collected fare plus a stated statistical annotation — the same data the
-    public dashboard already shows. Hiding it would be inconsistent with
-    everything else here.
+  - **Flags are regulator-only, listing and detail both.** A flag names a
+    specific carrier on a specific route and date. However carefully it is
+    labelled as a statistical observation, published openly it reads as an
+    accusation, and it would be quoted as one. Whether any of it warrants
+    action is a human regulator's judgement to make before it goes
+    anywhere, so the flag queue does not leave that desk. The one
+    exception is the carrier itself, which can see the flags raised against
+    it via app.routers.operator — the subject of a review being able to
+    read and answer it is due process, not a leak.
   - **Write actions are gated** (reviewing/dismissing a flag, triaging a
-    report). An open internet endpoint that lets anyone mark a real flag
-    "dismissed" would make the review state meaningless.
+    report). An open endpoint letting anyone mark a real flag "dismissed"
+    would make the review state meaningless.
   - **Draft notices are gated.** The document is designed to be read as a
     serious evidence packet; leaving it public invites it being lifted out
     of context and passed around as though it were an issued finding,
     which is precisely what its disclaimer exists to prevent.
-  - **Citizen report listing is gated, but the count is public.** Reports
-    may carry an optional contact email, and they are unverified by
-    construction — publishing the raw list would both expose that contact
-    detail and risk unverified claims being read with the same weight as
-    verified data. The public count keeps the existence and backlog of
-    reports honestly visible without either problem.
+  - **Submitting a fare report needs any signed-in account; the raw list
+    needs a regulator; the aggregate count is public.** Submission is the
+    one thing a traveller signs in for, because an unauthenticated write
+    endpoint feeding a human triage queue invites being flooded with junk.
+    The raw list stays regulator-only: reports may carry an optional
+    contact email and are unverified by construction, so publishing them
+    would both expose that contact detail and risk unverified claims being
+    read with the weight of measured data. The count is public so the
+    backlog is honestly visible on the public report page.
 
 Nothing here sends anything to any airline or third party. See
 app.regulator.notice_draft for why that is a design boundary rather than an
@@ -34,13 +50,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth.deps import current_user, db_session, require_regulator
 from app.config import PLAUSIBLE_FARE_INR_RANGE
-from app.db.models import Carrier, CitizenFareReport, RegulatorFareFlag
-from app.db.session import get_session
+from app.db.models import CitizenFareReport, RegulatorFareFlag, User
 from app.index.anomaly_detection import why_context_for_flag
 from app.pipeline.clean import is_plausible_fare
-from app.regulator.auth import require_regulator_token
 from app.regulator.notice_draft import build_draft_notice
+from app.regulator.views import carrier_names, flag_to_out, report_to_out
 from app.schemas import (
     CitizenFareReportIn,
     CitizenFareReportOut,
@@ -61,48 +77,19 @@ ALLOWED_REVIEW_STATUSES = {"reviewed", "dismissed"}
 ALLOWED_REPORT_STATUSES = {"reviewed"}
 
 
-def _session():
-    with get_session() as session:
-        yield session
-
-
-def _flag_to_out(flag: RegulatorFareFlag, carrier_names: dict[str, str]) -> dict:
-    return {
-        "id": flag.id,
-        "route": flag.route.display_name if flag.route else str(flag.route_id),
-        "route_id": flag.route_id,
-        "carrier_code": flag.carrier_code,
-        "carrier_name": carrier_names.get(flag.carrier_code, flag.carrier_code),
-        "ap_window_days": flag.ap_window_days,
-        "flagged_search_date": flag.flagged_search_date.date(),
-        "flagged_travel_date": flag.flagged_travel_date.date(),
-        "observed_fare": flag.observed_fare,
-        "baseline_median_fare": flag.baseline_median_fare,
-        "baseline_mad": flag.baseline_mad,
-        "robust_z_score": flag.robust_z_score,
-        "pct_above_baseline_median": flag.pct_above_baseline_median,
-        "baseline_sample_size": flag.baseline_sample_size,
-        "status": flag.status,
-        "review_note": flag.review_note,
-        "reviewed_by": flag.reviewed_by,
-        "reviewed_at": flag.reviewed_at,
-        "detected_at": flag.detected_at,
-    }
-
-
-def _carrier_names(session: Session) -> dict[str, str]:
-    return {c.code: c.name for c in session.execute(select(Carrier)).scalars().all()}
-
-
-@router.get("/flags", response_model=list[RegulatorFlagOut])
+@router.get(
+    "/flags",
+    response_model=list[RegulatorFlagOut],
+    dependencies=[Depends(require_regulator)],
+)
 def list_flags(
     status_filter: str | None = None,
     route_id: int | None = None,
     carrier_code: str | None = None,
-    session: Session = Depends(_session),
+    session: Session = Depends(db_session),
 ) -> list[RegulatorFlagOut]:
     """Real flagged fares, newest first. `status_filter` accepts
-    new|reviewed|dismissed."""
+    new|reviewed|dismissed. Regulator-only — see this module's docstring."""
     query = select(RegulatorFareFlag).order_by(
         RegulatorFareFlag.flagged_search_date.desc(), RegulatorFareFlag.id.desc()
     )
@@ -114,19 +101,23 @@ def list_flags(
         query = query.where(RegulatorFareFlag.carrier_code == carrier_code)
 
     flags = session.execute(query).scalars().all()
-    names = _carrier_names(session)
-    return [RegulatorFlagOut(**_flag_to_out(f, names)) for f in flags]
+    names = carrier_names(session)
+    return [RegulatorFlagOut(**flag_to_out(f, names)) for f in flags]
 
 
-@router.get("/flags/{flag_id}", response_model=RegulatorFlagDetailOut)
-def get_flag(flag_id: int, session: Session = Depends(_session)) -> RegulatorFlagDetailOut:
+@router.get(
+    "/flags/{flag_id}",
+    response_model=RegulatorFlagDetailOut,
+    dependencies=[Depends(require_regulator)],
+)
+def get_flag(flag_id: int, session: Session = Depends(db_session)) -> RegulatorFlagDetailOut:
     """One flag plus its live `possible_factors` — real, dated context that
     may bear on the fare, never a computed explanation of it."""
     flag = session.get(RegulatorFareFlag, flag_id)
     if flag is None:
         raise HTTPException(status_code=404, detail=f"no flag with id {flag_id}")
 
-    payload = _flag_to_out(flag, _carrier_names(session))
+    payload = flag_to_out(flag, carrier_names(session))
     payload["possible_factors"] = why_context_for_flag(
         session,
         carrier_code=flag.carrier_code,
@@ -136,16 +127,19 @@ def get_flag(flag_id: int, session: Session = Depends(_session)) -> RegulatorFla
     return RegulatorFlagDetailOut(**payload)
 
 
-@router.patch(
-    "/flags/{flag_id}/review",
-    response_model=RegulatorFlagOut,
-    dependencies=[Depends(require_regulator_token)],
-)
+@router.patch("/flags/{flag_id}/review", response_model=RegulatorFlagOut)
 def review_flag(
-    flag_id: int, body: RegulatorFlagReviewIn, session: Session = Depends(_session)
+    flag_id: int,
+    body: RegulatorFlagReviewIn,
+    reviewer: User = Depends(require_regulator),
+    session: Session = Depends(db_session),
 ) -> RegulatorFlagOut:
-    """Records a human's decision on a flag. `reviewed_by` is a free-text
-    label, not a verified identity — see app.regulator.auth."""
+    """Records a regulator's decision on a flag.
+
+    `reviewed_by` is taken from the signed-in account, never from the
+    request body — a caller must not be able to attribute a review decision
+    to somebody else.
+    """
     if body.status not in ALLOWED_REVIEW_STATUSES:
         raise HTTPException(
             status_code=422,
@@ -158,18 +152,18 @@ def review_flag(
 
     flag.status = body.status
     flag.review_note = body.review_note
-    flag.reviewed_by = body.reviewed_by
+    flag.reviewed_by = reviewer.username
     flag.reviewed_at = dt.datetime.utcnow()
     session.flush()
-    return RegulatorFlagOut(**_flag_to_out(flag, _carrier_names(session)))
+    return RegulatorFlagOut(**flag_to_out(flag, carrier_names(session)))
 
 
 @router.get(
     "/flags/{flag_id}/draft-notice",
     response_model=DraftNoticeOut,
-    dependencies=[Depends(require_regulator_token)],
+    dependencies=[Depends(require_regulator)],
 )
-def flag_draft_notice(flag_id: int, session: Session = Depends(_session)) -> DraftNoticeOut:
+def flag_draft_notice(flag_id: int, session: Session = Depends(db_session)) -> DraftNoticeOut:
     """A DRAFT evidence document for a human regulator to review and, if
     they judge it warranted, act on through their own official channels.
     This endpoint returns a document; it does not send one, and no endpoint
@@ -184,10 +178,24 @@ def flag_draft_notice(flag_id: int, session: Session = Depends(_session)) -> Dra
     "/citizen-reports", response_model=CitizenFareReportOut, status_code=status.HTTP_201_CREATED
 )
 def submit_citizen_report(
-    body: CitizenFareReportIn, session: Session = Depends(_session)
+    body: CitizenFareReportIn,
+    submitter: User = Depends(current_user),
+    session: Session = Depends(db_session),
 ) -> CitizenFareReportOut:
-    """Open intake for a member of the public. Stored as an explicitly
-    unverified report — never merged into the real-data flag table."""
+    """Intake for a member of the public. Stored as an explicitly unverified
+    report — never merged into the real-data flag table.
+
+    Requires an account, unlike everything else a traveller does here.
+    Reading is open to anyone; writing is not, because an unauthenticated
+    write endpoint feeding a human triage queue is an open invitation to
+    flood it. Attaching each report to an account makes a spammer
+    identifiable and their reports removable as a set.
+
+    Any signed-in role may file one: a regulator or an airline employee who
+    books a flight is also a traveller, and inventing a rule that they
+    cannot report a fare would add a failure mode without protecting
+    anything.
+    """
     if not is_plausible_fare(body.reported_fare):
         low, high = PLAUSIBLE_FARE_INR_RANGE
         raise HTTPException(
@@ -207,27 +215,15 @@ def submit_citizen_report(
         contact_email=body.contact_email.strip(),
         submitted_at=dt.datetime.utcnow(),
         status="new",
+        submitted_by_user_id=submitter.id,
     )
     session.add(report)
     session.flush()
-    return CitizenFareReportOut(
-        id=report.id,
-        origin=report.origin,
-        destination=report.destination,
-        travel_date=report.travel_date.date(),
-        reported_fare=report.reported_fare,
-        carrier_name=report.carrier_name,
-        note=report.note,
-        contact_email=report.contact_email,
-        submitted_at=report.submitted_at,
-        status=report.status,
-        reviewer_note=report.reviewer_note,
-        reviewed_at=report.reviewed_at,
-    )
+    return CitizenFareReportOut(**report_to_out(report))
 
 
 @router.get("/citizen-reports/count", response_model=CitizenReportCountOut)
-def citizen_report_count(session: Session = Depends(_session)) -> CitizenReportCountOut:
+def citizen_report_count(session: Session = Depends(db_session)) -> CitizenReportCountOut:
     """Aggregate counts only — public visibility into how many reports exist
     and how many are still untriaged, without exposing unverified content or
     anyone's contact detail."""
@@ -243,41 +239,25 @@ def citizen_report_count(session: Session = Depends(_session)) -> CitizenReportC
 @router.get(
     "/citizen-reports",
     response_model=list[CitizenFareReportOut],
-    dependencies=[Depends(require_regulator_token)],
+    dependencies=[Depends(require_regulator)],
 )
 def list_citizen_reports(
-    status_filter: str | None = None, session: Session = Depends(_session)
+    status_filter: str | None = None, session: Session = Depends(db_session)
 ) -> list[CitizenFareReportOut]:
     query = select(CitizenFareReport).order_by(CitizenFareReport.submitted_at.desc())
     if status_filter:
         query = query.where(CitizenFareReport.status == status_filter)
     reports = session.execute(query).scalars().all()
-    return [
-        CitizenFareReportOut(
-            id=r.id,
-            origin=r.origin,
-            destination=r.destination,
-            travel_date=r.travel_date.date(),
-            reported_fare=r.reported_fare,
-            carrier_name=r.carrier_name,
-            note=r.note,
-            contact_email=r.contact_email,
-            submitted_at=r.submitted_at,
-            status=r.status,
-            reviewer_note=r.reviewer_note,
-            reviewed_at=r.reviewed_at,
-        )
-        for r in reports
-    ]
+    return [CitizenFareReportOut(**report_to_out(r)) for r in reports]
 
 
 @router.patch(
     "/citizen-reports/{report_id}/review",
     response_model=CitizenFareReportOut,
-    dependencies=[Depends(require_regulator_token)],
+    dependencies=[Depends(require_regulator)],
 )
 def review_citizen_report(
-    report_id: int, body: CitizenReportReviewIn, session: Session = Depends(_session)
+    report_id: int, body: CitizenReportReviewIn, session: Session = Depends(db_session)
 ) -> CitizenFareReportOut:
     if body.status not in ALLOWED_REPORT_STATUSES:
         raise HTTPException(
@@ -292,17 +272,4 @@ def review_citizen_report(
     report.reviewer_note = body.reviewer_note
     report.reviewed_at = dt.datetime.utcnow()
     session.flush()
-    return CitizenFareReportOut(
-        id=report.id,
-        origin=report.origin,
-        destination=report.destination,
-        travel_date=report.travel_date.date(),
-        reported_fare=report.reported_fare,
-        carrier_name=report.carrier_name,
-        note=report.note,
-        contact_email=report.contact_email,
-        submitted_at=report.submitted_at,
-        status=report.status,
-        reviewer_note=report.reviewer_note,
-        reviewed_at=report.reviewed_at,
-    )
+    return CitizenFareReportOut(**report_to_out(report))

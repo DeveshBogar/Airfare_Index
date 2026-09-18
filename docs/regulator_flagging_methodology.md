@@ -135,37 +135,59 @@ function, class, schema field, DB column, or actual API response key in the feat
 starts to look like autonomous dispatch or a fairness finding, if a dispatch-capable
 library is ever imported into the feature, or if a flag ever gains a `sent` status.
 
-## Regulator access is prototype-grade
+## Regulator access is role-based
 
-The gated endpoints require a single shared token (`X-Regulator-Token`, configured
-via the `REGULATOR_ACCESS_TOKEN` environment variable, never committed).
+The gated endpoints require a signed-in account with the `regulator` role. This
+replaced an earlier single shared token, and the difference is not cosmetic: a
+shared secret proved only that the caller held it, so every reviewer was
+indistinguishable from every other one and `reviewed_by` could not be more than
+free text. It is now taken from the session and written server-side — the API
+rejects a `reviewed_by` supplied in the request body — so the review trail is an
+actual record of who decided what.
 
-What it provides: the review actions, the draft-notice document, and the raw
-citizen-report list aren't open to the public internet.
+Passwords are hashed with scrypt (`backend/app/auth/passwords.py`); sessions are
+HMAC-signed bearer tokens with a working-day lifetime
+(`backend/app/auth/tokens.py`). Every request re-reads the account from the
+database and decides from that row, so deactivating an account or changing its
+role takes effect on the next request rather than at token expiry.
 
-What it does **not** provide, stated plainly:
+What this still does **not** provide, stated plainly:
 
-- **Not authentication.** It proves possession of a shared secret, not identity.
-  Everyone holding the token is indistinguishable.
-- **Not an audit trail.** `reviewed_by` is free text the reviewer types; the system
-  cannot verify it.
-- **Not authorization.** No roles, no scopes — the token opens every gated endpoint
-  or none.
-
-A real deployment would place a proper identity provider in front of this. It fails
-**closed**: with no token configured, gated endpoints return 503 rather than falling
-open, the same posture `app/scraper/compliance.py` takes when it cannot verify a
-robots.txt.
+- **No per-token revocation.** Tokens are stateless; nothing records which ones
+  exist. Deactivating the account works immediately, but a single leaked token
+  cannot be invalidated on its own before it expires.
+- **No password reset, lockout, or second factor.** There is no self-service
+  recovery flow, no throttle on repeated failed logins beyond what one process
+  gives you, and no MFA.
+- **Not an identity provider.** A deployment holding real regulator credentials
+  should put one in front of this.
 
 ### What is and isn't gated, and why
 
 | Surface | Access | Reasoning |
 |---|---|---|
-| Flag list & detail | Public | Same real collected data the public dashboard already shows, plus a stated statistical annotation |
-| Citizen-report count | Public | Honest visibility that reports exist and how many await review |
-| Review / dismiss a flag | Token | An open endpoint letting anyone mark a flag "dismissed" would make the review state meaningless |
-| Draft notice | Token | Designed to read as a serious evidence packet; public access invites it circulating out of context |
-| Raw citizen-report list | Token | May carry an optional contact email, and these are unverified — publishing them risks both a privacy leak and unverified claims being read as verified |
+| Flag list & detail | Government | A flag names a carrier, a route and a date. However carefully it is labelled a statistical observation, published openly it reads as an accusation and would be quoted as one — that judgement belongs with a human regulator before it goes anywhere |
+| Review / dismiss a flag | Government | An open endpoint letting anyone mark a flag "dismissed" would make the review state meaningless |
+| Draft notice | Government | Designed to read as a serious evidence packet; public access invites it circulating out of context |
+| Raw citizen-report list | Government | May carry an optional contact email, and these are unverified — publishing them risks both a privacy leak and unverified claims being read as verified |
+| A carrier's own flags, and responding to them | Airline (own carrier only) | The carrier a flag names can read it and put its account on the record before a human decides anything. Due process, not disclosure — no airline sees another's |
+| Submit a fare report | Any signed-in account | An unauthenticated write endpoint feeding a human triage queue is an invitation to flood it; tying each report to an account makes a spammer identifiable and their reports removable as a set |
+| The report count | Public | Aggregate only — carries no content or contact details, so the backlog stays honestly visible on the public report page |
+| Index, routes, affordability, festival watch, per-carrier index, compliance | Public | The transparency half of the project. Reading never needs an account |
+
+### The airline's right of reply
+
+A flagged carrier can file a written response to a flag raised against it, which
+the reviewing official sees alongside the flag. This follows directly from what a
+flag is: a real fare plus a statistical annotation, explicitly **not** a finding
+of wrongdoing. Letting the subject answer before a human acts is part of that
+boundary rather than a courtesy feature.
+
+An operator can write only the response text. It cannot change a flag's status,
+its review note, or any measured value — answering a flag is a right of reply,
+not the power to close it. The response is displayed as the carrier's own
+unverified account, never merged into the measured data, for the same reason
+citizen reports are kept separate.
 
 ## Citizen reports are unverified, and kept that way
 

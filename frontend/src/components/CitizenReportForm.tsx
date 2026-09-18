@@ -2,16 +2,24 @@ import { useState } from "react";
 import { api, type CitizenReportCount } from "../api";
 import { Panel } from "./Panel";
 
-// Public intake. These reports are stored entirely separately from the
-// system's own real-data flags and are never merged into them — an
-// unverified claim must not inherit the credibility of collected data. The
-// copy below says that plainly to the person submitting, so nobody is
-// misled about what happens next.
+// Intake for the travelling public. Reading this page needs no account;
+// submitting does, because an open write endpoint feeding a human triage
+// queue is an invitation to flood it.
+//
+// These reports are stored entirely separately from the system's own
+// real-data flags and are never merged into them — an unverified claim must
+// not inherit the credibility of collected data. The copy below says that
+// plainly to the person submitting, so nobody is misled about what happens
+// next.
 export function CitizenReportForm({
   count,
+  signedIn,
+  onRequestSignIn,
   onSubmitted,
 }: {
   count: CitizenReportCount | null;
+  signedIn: boolean;
+  onRequestSignIn: () => void;
   onSubmitted: () => void;
 }) {
   const [origin, setOrigin] = useState("");
@@ -60,7 +68,7 @@ export function CitizenReportForm({
   return (
     <Panel
       title="Report a fare you think is unreasonable"
-      subtitle="Anyone can submit a fare here. Submissions are unverified by definition — they are stored separately from this system's own collected price data and are never mixed into the flagged-fares list. A reviewer can read them alongside the real data, but a report on its own is not evidence of anything."
+      subtitle="Submissions are unverified by definition — they are stored separately from this system's own collected price data and are never mixed into the flagged-fares list. A reviewer can read them alongside the real data, but a report on its own is not evidence of anything. Reporting needs an account so the queue can't be flooded anonymously; reading anything else on this site does not."
     >
       <div className="flex flex-col gap-3">
         {count && (
@@ -69,6 +77,28 @@ export function CitizenReportForm({
           </p>
         )}
 
+        {!signedIn && (
+          <div className="rounded-xl border border-border bg-page p-4">
+            <p className="text-sm text-ink">Sign in to report a fare.</p>
+            <p className="text-sm text-ink-secondary mt-1 leading-relaxed max-w-2xl">
+              Every report goes into a queue a person reads, so each one is tied to an account — that way a
+              flood of junk is traceable and removable, instead of drowning the real reports. Everything else
+              on this dashboard stays open without signing in.
+            </p>
+            <button
+              onClick={onRequestSignIn}
+              className="mt-3 text-sm px-3 py-1.5 rounded-lg border border-border text-ink-secondary hover:bg-surface hover:text-ink transition-colors"
+            >
+              Sign in
+            </button>
+          </div>
+        )}
+
+        {/* The form is hidden rather than disabled when signed out: a greyed-out
+            set of fields invites someone to fill it in and only then discover
+            they can't send it. */}
+        {signedIn && (
+        <>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
           <Field label="From" value={origin} onChange={setOrigin} placeholder="Delhi" />
           <Field label="To" value={destination} onChange={setDestination} placeholder="Patna" />
@@ -142,6 +172,8 @@ export function CitizenReportForm({
             {busy ? "Submitting…" : "Submit report"}
           </button>
         </div>
+        </>
+        )}
       </div>
     </Panel>
   );

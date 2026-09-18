@@ -8,6 +8,10 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 
+# Session signing key, generated on first run (see app/auth/tokens.py).
+# Never commit this: anyone holding it can mint a token for any account.
+data/.auth_secret
+
 # Data (kept locally; reference CSV + raw snapshots are the audit trail
 # and can be large — see data/reference/README.md for how to regenerate)
 # data/airfare.db

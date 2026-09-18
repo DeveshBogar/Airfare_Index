@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, RegulatorAuthError, type DraftNotice, type RegulatorFlag, type RegulatorFlagDetail } from "../api";
+import { api, AuthError, type DraftNotice, type RegulatorFlag, type RegulatorFlagDetail } from "../api";
 import { formatINR } from "../labels";
 import { DraftNoticeView } from "./DraftNoticeView";
 import { FactorList } from "./FactorList";
@@ -24,15 +24,16 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+// Only ever rendered inside the regulator tab, which only a signed-in
+// government account can open — so there is no signed-out state to handle
+// here. The endpoints enforce the same rule independently.
 export function RegulatorFlags({
   flags,
   loading,
-  hasToken,
   onReviewed,
 }: {
   flags: RegulatorFlag[] | null;
   loading: boolean;
-  hasToken: boolean;
   onReviewed: () => void;
 }) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -40,7 +41,6 @@ export function RegulatorFlags({
   const [notice, setNotice] = useState<DraftNotice | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState("");
-  const [reviewer, setReviewer] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function toggle(flag: RegulatorFlag) {
@@ -54,7 +54,6 @@ export function RegulatorFlags({
     setExpandedId(flag.id);
     setDetail(null);
     setNote(flag.review_note);
-    setReviewer(flag.reviewed_by);
     try {
       setDetail(await api.regulatorFlag(flag.id));
     } catch (e) {
@@ -66,7 +65,7 @@ export function RegulatorFlags({
     setBusy(true);
     setError(null);
     try {
-      await api.reviewFlag(flag.id, { status, review_note: note, reviewed_by: reviewer });
+      await api.reviewFlag(flag.id, { status, review_note: note });
       onReviewed();
     } catch (e) {
       setError(describeError(e));
@@ -178,51 +177,56 @@ export function RegulatorFlags({
                       <p className="text-sm text-ink-muted">Loading context…</p>
                     )}
 
-                    {hasToken ? (
-                      <div className="mt-4 flex flex-col gap-2 border-t border-hairline pt-3">
-                        <div className="flex flex-wrap gap-2">
-                          <input
-                            value={reviewer}
-                            onChange={(e) => setReviewer(e.target.value)}
-                            placeholder="Your desk / initials"
-                            className="text-sm px-2.5 py-1.5 rounded-lg border border-border bg-surface text-ink placeholder:text-ink-muted"
-                          />
-                          <input
-                            value={note}
-                            onChange={(e) => setNote(e.target.value)}
-                            placeholder="Review note (what you concluded and why)"
-                            className="text-sm px-2.5 py-1.5 rounded-lg border border-border bg-surface text-ink placeholder:text-ink-muted flex-1 min-w-[16rem]"
-                          />
+                    {flag.operator_response && (
+                      <div className="mt-4 rounded-xl border border-border bg-page p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-ink-muted mb-1">
+                          The airline's response
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            disabled={busy}
-                            onClick={() => review(flag, "reviewed")}
-                            className="text-sm px-3 py-1.5 rounded-lg border border-border text-ink-secondary hover:bg-page hover:text-ink transition-colors disabled:opacity-50"
-                          >
-                            Mark reviewed
-                          </button>
-                          <button
-                            disabled={busy}
-                            onClick={() => review(flag, "dismissed")}
-                            className="text-sm px-3 py-1.5 rounded-lg border border-border text-ink-secondary hover:bg-page hover:text-ink transition-colors disabled:opacity-50"
-                          >
-                            Dismiss
-                          </button>
-                          <button
-                            disabled={busy}
-                            onClick={() => openNotice(flag)}
-                            className="text-sm px-3 py-1.5 rounded-lg border border-border text-ink-secondary hover:bg-page hover:text-ink transition-colors disabled:opacity-50"
-                          >
-                            Generate draft notice
-                          </button>
-                        </div>
+                        <p className="text-sm text-ink whitespace-pre-line">{flag.operator_response}</p>
+                        <p className="text-xs text-ink-muted mt-1.5">
+                          Filed by {flag.operator_responded_by}
+                          {flag.operator_responded_at
+                            ? ` on ${new Date(flag.operator_responded_at).toLocaleDateString("en-IN")}`
+                            : ""}
+                          . Unverified — the carrier's own account, shown so it is on the record before a
+                          decision is taken.
+                        </p>
                       </div>
-                    ) : (
-                      <p className="text-xs text-ink-muted mt-4 border-t border-hairline pt-3">
-                        Enter the access key above to record a review or generate a draft notice.
-                      </p>
                     )}
+
+                    <div className="mt-4 flex flex-col gap-2 border-t border-hairline pt-3">
+                      <div className="flex flex-wrap gap-2">
+                        <input
+                          value={note}
+                          onChange={(e) => setNote(e.target.value)}
+                          placeholder="Review note (what you concluded and why)"
+                          className="text-sm px-2.5 py-1.5 rounded-lg border border-border bg-surface text-ink placeholder:text-ink-muted flex-1 min-w-[16rem]"
+                        />
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          disabled={busy}
+                          onClick={() => review(flag, "reviewed")}
+                          className="text-sm px-3 py-1.5 rounded-lg border border-border text-ink-secondary hover:bg-page hover:text-ink transition-colors disabled:opacity-50"
+                        >
+                          Mark reviewed
+                        </button>
+                        <button
+                          disabled={busy}
+                          onClick={() => review(flag, "dismissed")}
+                          className="text-sm px-3 py-1.5 rounded-lg border border-border text-ink-secondary hover:bg-page hover:text-ink transition-colors disabled:opacity-50"
+                        >
+                          Dismiss
+                        </button>
+                        <button
+                          disabled={busy}
+                          onClick={() => openNotice(flag)}
+                          className="text-sm px-3 py-1.5 rounded-lg border border-border text-ink-secondary hover:bg-page hover:text-ink transition-colors disabled:opacity-50"
+                        >
+                          Generate draft notice
+                        </button>
+                      </div>
+                    </div>
 
                     {notice && <DraftNoticeView notice={notice} onClose={() => setNotice(null)} />}
                   </>
@@ -237,10 +241,10 @@ export function RegulatorFlags({
 }
 
 function describeError(e: unknown): string {
-  if (e instanceof RegulatorAuthError) {
-    return e.status === 503
-      ? "The server has no regulator access key configured, so these actions are locked (it fails closed rather than falling open). Set REGULATOR_ACCESS_TOKEN on the backend."
-      : "That access key wasn't accepted. Check the key and try again.";
+  if (e instanceof AuthError) {
+    return e.status === 403
+      ? "Your account doesn't have the government role these actions need."
+      : "Your session has ended. Sign in again to continue.";
   }
   return e instanceof Error ? e.message : String(e);
 }

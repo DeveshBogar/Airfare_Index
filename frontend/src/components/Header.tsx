@@ -1,7 +1,15 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { ThemeToggle } from "./ThemeToggle";
 
-export function Header({ onRefresh, refreshing }: { onRefresh: () => void; refreshing: boolean }) {
+export function Header({
+  onRefresh,
+  refreshing,
+  signIn,
+}: {
+  onRefresh: () => void;
+  refreshing: boolean;
+  signIn?: ReactNode;
+}) {
   const [showAbout, setShowAbout] = useState(false);
 
   return (
@@ -11,7 +19,8 @@ export function Header({ onRefresh, refreshing }: { onRefresh: () => void; refre
           <h1 className="text-[22px] font-semibold text-ink tracking-tight">Airfare Price Index</h1>
           <p className="text-sm text-ink-secondary mt-0.5">Tracking real domestic flight prices across India, every day</p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {signIn}
           <button
             onClick={() => setShowAbout((v) => !v)}
             aria-expanded={showAbout}

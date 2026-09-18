@@ -7,6 +7,7 @@ import {
   type BookingAdvice as BookingAdviceData,
   type ByCarrierIndex,
   type CarrierFinancialContext as CarrierFinancialContextData,
+  type CitizenFareReport,
   type CitizenReportCount,
   type ComplianceStatus,
   type CoverageReport,
@@ -15,18 +16,22 @@ import {
   type FareQuote,
   type IndexDailyPoint,
   type News,
+  type OperatorOverview,
   type PriceGrid,
   type RegulatorFlag,
   type RouteOut,
   type RoutePriceHistory,
   type SpikeWatch as SpikeWatchData,
 } from "./api";
-import { getRegulatorToken } from "./regulatorAuth";
+import { getToken, landingTabFor, setToken, type AuthUser } from "./auth";
+import { AccountControl } from "./components/AccountControl";
 import { Affordability } from "./components/Affordability";
+import { AirlineDashboard } from "./components/AirlineDashboard";
 import { BookingAdvice } from "./components/BookingAdvice";
 import { CarrierFinancialContext } from "./components/CarrierFinancialContext";
 import { CarrierIndexChart } from "./components/CarrierIndexChart";
 import { CitizenReportForm } from "./components/CitizenReportForm";
+import { CitizenReports } from "./components/CitizenReports";
 import { CpiDivergence } from "./components/CpiDivergence";
 import { DataSources } from "./components/DataSources";
 import { DateWatch } from "./components/DateWatch";
@@ -38,15 +43,16 @@ import { Header } from "./components/Header";
 import { HeroStat } from "./components/HeroStat";
 import { KpiCards } from "./components/KpiCards";
 import { LoadingSkeleton } from "./components/LoadingSkeleton";
+import { LoginPage } from "./components/LoginPage";
+import { MyReports } from "./components/MyReports";
 import { NewsFeed } from "./components/NewsFeed";
 import { PageSummary } from "./components/PageSummary";
 import { PriceHistory } from "./components/PriceHistory";
 import { RegulatorFlags } from "./components/RegulatorFlags";
-import { RegulatorTokenGate } from "./components/RegulatorTokenGate";
 import { RouteFilter } from "./components/RouteFilter";
 import { SectorHeatmap } from "./components/SectorHeatmap";
 import { SpikeWatch } from "./components/SpikeWatch";
-import { TAB_KEYS, TabNav, type TabKey } from "./components/TabNav";
+import { TAB_KEYS, TabNav, visibleTabs, type TabKey } from "./components/TabNav";
 import { TrendChart } from "./components/TrendChart";
 import { useUrlState } from "./urlState";
 
@@ -89,7 +95,6 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [tabParam, setTabParam] = useUrlState("tab", "overview");
-  const activeTab: TabKey = isTabKey(tabParam) ? tabParam : "overview";
   const [routeParam, setRouteParam] = useUrlState("route", null);
   const routeFilterId = routeParam != null && routeParam !== "" ? Number(routeParam) : null;
   const [routeElasticity, setRouteElasticity] = useState<ElasticityPoint[] | null>(null);
@@ -102,7 +107,24 @@ function App() {
   const [flags, setFlags] = useState<RegulatorFlag[] | null>(null);
   const [flagsLoading, setFlagsLoading] = useState(false);
   const [reportCount, setReportCount] = useState<CitizenReportCount | null>(null);
-  const [regulatorToken, setRegulatorTokenState] = useState<string | null>(getRegulatorToken());
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [citizenReports, setCitizenReports] = useState<CitizenFareReport[] | null>(null);
+  const [myReports, setMyReports] = useState<CitizenFareReport[] | null>(null);
+  const [operatorOverview, setOperatorOverview] = useState<OperatorOverview | null>(null);
+  const [operatorFlags, setOperatorFlags] = useState<RegulatorFlag[] | null>(null);
+  const [operatorFares, setOperatorFares] = useState<FareQuote[] | null>(null);
+  const [operatorLoading, setOperatorLoading] = useState(false);
+  // ?signin=1 so the login page is refreshable and linkable, and so the
+  // browser back button leaves it the way it leaves any other view.
+  const [signinParam, setSigninParam] = useUrlState("signin", null);
+  const [signinReason, setSigninReason] = useState<string | null>(null);
+
+  // A ?tab= that this role has no tab for (an airline link opened while
+  // signed out, say) falls back to the public overview rather than
+  // rendering a panel with no way to navigate away from it.
+  const allowedTabs = visibleTabs(user?.role ?? null);
+  const activeTab: TabKey =
+    isTabKey(tabParam) && allowedTabs.includes(tabParam) ? tabParam : "overview";
 
   async function load() {
     setRefreshing(true);
@@ -186,6 +208,89 @@ function App() {
       .catch(() => setFinancialContext(null));
   }, []);
 
+  useEffect(() => {
+    // Restore a session left in this tab. A token that the server no longer
+    // accepts (expired, or the account was deactivated) resolves to signed
+    // out rather than an error — a stale session should never break a page
+    // that does not need one.
+    if (getToken() == null) return;
+    api
+      .me()
+      .then(setUser)
+      .catch(() => {
+        setToken(null);
+        setUser(null);
+        setSigninReason("Your session has ended. Sign in again to continue.");
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function loadReportCount() {
+    // Public aggregate — no account needed, and it carries no report content
+    // or contact details, only how many exist and how many await triage.
+    api.citizenReportCount().then(setReportCount).catch(() => setReportCount(null));
+  }
+
+  function loadMyReports() {
+    // Signed-in only; there is nothing to show an anonymous visitor, and the
+    // endpoint would 401.
+    if (getToken() == null) return;
+    api.myReports().then(setMyReports).catch(() => setMyReports(null));
+  }
+
+  function loadOperatorData() {
+    setOperatorLoading(true);
+    Promise.all([api.operatorOverview(), api.operatorFlags(), api.operatorFares()])
+      .then(([overview, flags, fares]) => {
+        setOperatorOverview(overview);
+        setOperatorFlags(flags);
+        setOperatorFares(fares);
+      })
+      .catch(() => {
+        setOperatorOverview(null);
+        setOperatorFlags(null);
+        setOperatorFares(null);
+      })
+      .finally(() => setOperatorLoading(false));
+  }
+
+  function handleSignedIn(nextUser: AuthUser, token: string) {
+    setToken(token);
+    setUser(nextUser);
+    setSigninParam(null);
+    setSigninReason(null);
+    setTabParam(landingTabFor(nextUser.role));
+    if (nextUser.role === "operator") loadOperatorData();
+    if (nextUser.role === "regulator") loadRegulatorData();
+    loadMyReports();
+  }
+
+  function handleSignedOut() {
+    setToken(null);
+    setUser(null);
+    // Drop everything that was only visible to that session, so no
+    // restricted data stays on screen after the session it belonged to has
+    // ended — including the flag queue, which is not public.
+    setFlags(null);
+    setCitizenReports(null);
+    setMyReports(null);
+    setOperatorOverview(null);
+    setOperatorFlags(null);
+    setOperatorFares(null);
+    setSigninReason(null);
+    if (activeTab === "airline" || activeTab === "regulator") setTabParam("overview");
+  }
+
+  function handleRequestSignIn() {
+    setSigninReason(null);
+    setSigninParam("1");
+  }
+
+  function handleDismissSignIn() {
+    setSigninParam(null);
+    setSigninReason(null);
+  }
+
   function loadRegulatorData() {
     setFlagsLoading(true);
     api
@@ -193,21 +298,26 @@ function App() {
       .then(setFlags)
       .catch(() => setFlags(null))
       .finally(() => setFlagsLoading(false));
-    api
-      .citizenReportCount()
-      .then(setReportCount)
-      .catch(() => setReportCount(null));
+    api.citizenReports().then(setCitizenReports).catch(() => setCitizenReports(null));
+    loadReportCount();
   }
 
   useEffect(() => {
-    // Lazy: only fetched once the Regulator tab is actually opened, and not
-    // added to the 60s poll — most visitors never open it, and flags only
-    // change when the daily detection run writes new ones.
-    if (activeTab === "regulator" && flags === null && !flagsLoading) {
+    // Lazy per tab, and not on the 60s poll: flags only change when the
+    // daily detection run writes new ones. The regulator fetch is guarded on
+    // the role as well as the tab — without an account it would only 401.
+    if (activeTab === "regulator" && user?.role === "regulator" && flags === null && !flagsLoading) {
       loadRegulatorData();
     }
+    if (activeTab === "airline" && operatorOverview === null && !operatorLoading) {
+      loadOperatorData();
+    }
+    if (activeTab === "report") {
+      if (reportCount === null) loadReportCount();
+      if (user && myReports === null) loadMyReports();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+  }, [activeTab, user]);
 
   useEffect(() => {
     if (routeFilterId == null) {
@@ -252,11 +362,30 @@ function App() {
   const elasticityData = routeFilterId != null ? (routeElasticity ?? []) : (data?.elasticity ?? []);
   const routeLookup = useMemo(() => buildRouteLookup(data?.routes ?? []), [data?.routes]);
 
+  // Signing in replaces the whole view rather than overlaying it: it is a
+  // deliberate act, not a filter tweak. Already-signed-in visitors never see
+  // it, so a stale ?signin=1 in a shared link just lands on the dashboard.
+  if (signinParam != null && user == null) {
+    return (
+      <LoginPage onSignedIn={handleSignedIn} onDismiss={handleDismissSignIn} reason={signinReason} />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-page">
       <div className="sticky top-0 z-20 border-b border-border bg-surface">
-        <Header onRefresh={load} refreshing={refreshing} />
-        {data && <TabNav active={activeTab} onChange={handleTabChange} />}
+        <Header
+          onRefresh={load}
+          refreshing={refreshing}
+          signIn={
+            <AccountControl
+              user={user}
+              onRequestSignIn={handleRequestSignIn}
+              onSignOut={handleSignedOut}
+            />
+          }
+        />
+        {data && <TabNav active={activeTab} onChange={handleTabChange} role={user?.role ?? null} />}
       </div>
 
       <main className="max-w-[1800px] mx-auto px-6 py-5 flex flex-col gap-4">
@@ -307,28 +436,50 @@ function App() {
               <Affordability data={data.affordability} />
             </TabPanel>
 
+            <TabPanel tabKey="report" active={activeTab}>
+              <CitizenReportForm
+                count={reportCount}
+                signedIn={user != null}
+                onRequestSignIn={handleRequestSignIn}
+                onSubmitted={() => {
+                  loadReportCount();
+                  loadMyReports();
+                }}
+              />
+              <MyReports reports={myReports} />
+            </TabPanel>
+
+            <TabPanel tabKey="airline" active={activeTab}>
+              <AirlineDashboard
+                overview={operatorOverview}
+                flags={operatorFlags}
+                fares={operatorFares}
+                routeLookup={routeLookup}
+                loading={operatorLoading}
+                onResponded={loadOperatorData}
+              />
+            </TabPanel>
+
             <TabPanel tabKey="regulator" active={activeTab}>
-              <section className="card-shadow rounded-2xl border border-border bg-surface p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-[15px] font-semibold text-ink">Regulator view</h2>
-                  <p className="text-sm text-ink-secondary mt-0.5 max-w-3xl leading-relaxed">
-                    Monitoring and evidence, not enforcement. This view flags real fares that ran unusually high
-                    against their own history and assembles the real, dated context behind them. It issues nothing
-                    and sends nothing to any airline — any action is a human's decision, taken through official
-                    channels.
-                  </p>
-                </div>
-                <RegulatorTokenGate onChange={setRegulatorTokenState} />
+              <section className="card-shadow rounded-2xl border border-border bg-surface p-5">
+                <h2 className="text-[15px] font-semibold text-ink">Regulator view</h2>
+                <p className="text-sm text-ink-secondary mt-0.5 max-w-3xl leading-relaxed">
+                  Monitoring and evidence, not enforcement. This view flags real fares that ran unusually high
+                  against their own history and assembles the real, dated context behind them. It issues nothing
+                  and sends nothing to any airline — any action is a human's decision, taken through official
+                  channels.
+                </p>
+                <p className="text-sm text-ink-muted mt-2 max-w-3xl leading-relaxed">
+                  Not public. A flag names a carrier, a route and a date, and however carefully it is labelled
+                  as a statistical observation it would be read as an accusation — so it stays on this desk.
+                  The named carrier can see and answer its own flags, which is due process rather than
+                  disclosure.
+                </p>
               </section>
 
-              <RegulatorFlags
-                flags={flags}
-                loading={flagsLoading}
-                hasToken={regulatorToken != null}
-                onReviewed={loadRegulatorData}
-              />
+              <RegulatorFlags flags={flags} loading={flagsLoading} onReviewed={loadRegulatorData} />
 
-              <CitizenReportForm count={reportCount} onSubmitted={loadRegulatorData} />
+              <CitizenReports reports={citizenReports} onReviewed={loadRegulatorData} />
             </TabPanel>
 
             <TabPanel tabKey="sources" active={activeTab}>

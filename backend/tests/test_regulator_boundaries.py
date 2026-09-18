@@ -23,10 +23,13 @@ import datetime as dt
 import inspect
 
 from app import schemas
+from app.auth import deps as auth_deps
+from app.auth import roles as auth_roles
+from app.auth import service as auth_service
 from app.db.models import CitizenFareReport, RegulatorFareFlag
 from app.index import anomaly_detection
-from app.regulator import auth, notice_draft
-from app.routers import regulator
+from app.regulator import notice_draft, views
+from app.routers import operator, regulator
 
 # "verdict" alone is deliberately not banned: app.index.booking_advice uses it
 # legitimately for booking-timing advice ("book_early"/"can_wait"), which is a
@@ -59,7 +62,20 @@ BANNED_AUTODISPATCH_FRAGMENTS = (
 
 ALL_BANNED = BANNED_VERDICT_FRAGMENTS + BANNED_AUTODISPATCH_FRAGMENTS
 
-FEATURE_MODULES = (anomaly_detection, auth, notice_draft, regulator)
+# The operator surface is in scope for the same reasons the regulator one
+# is: it renders the same flags, and it is the one place an airline can
+# write to them. A "we reviewed your response and found a violation" shaped
+# field appearing there would cross exactly the boundary these tests guard.
+FEATURE_MODULES = (
+    anomaly_detection,
+    notice_draft,
+    views,
+    regulator,
+    operator,
+    auth_roles,
+    auth_service,
+    auth_deps,
+)
 
 NO_ROBOTS_RESTRICTION = "User-agent: *\nAllow: /\n"
 
@@ -107,6 +123,8 @@ def test_no_schema_field_crosses_either_boundary():
         "CitizenFareReportOut",
         "CitizenReportReviewIn",
         "CitizenReportCountOut",
+        "OperatorFlagResponseIn",
+        "OperatorOverviewOut",
     ]
     for schema_name in schema_names:
         model = getattr(schemas, schema_name)

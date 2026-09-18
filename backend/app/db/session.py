@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import DATA_DIR, DB_PATH
@@ -36,9 +36,43 @@ def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
 
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
+# Columns added to tables that already exist in deployed databases.
+# create_all() creates missing *tables* but never alters existing ones, so
+# without this an established data/airfare.db keeps its old shape and every
+# query touching a new column fails with "no such column".
+#
+# This is intentionally not Alembic. Alembic earns its keep once migrations
+# need ordering, data backfills or rollback; every entry here is a nullable
+# or defaulted ADD COLUMN, which SQLite applies in place and which is safe to
+# re-run. If a migration ever needs more than that, it needs Alembic, not a
+# bigger version of this list.
+_ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
+    ("regulator_fare_flags", "operator_response", "VARCHAR(4096) DEFAULT ''"),
+    ("regulator_fare_flags", "operator_responded_by", "VARCHAR(128) DEFAULT ''"),
+    ("regulator_fare_flags", "operator_responded_at", "DATETIME"),
+    # NULL default is required by SQLite for an added column carrying a
+    # REFERENCES clause while foreign_keys=ON.
+    ("citizen_fare_reports", "submitted_by_user_id", "INTEGER REFERENCES users(id)"),
+]
+
+
+def _apply_additive_columns() -> None:
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
+    with engine.begin() as connection:
+        for table, column, ddl_type in _ADDITIVE_COLUMNS:
+            if table not in existing_tables:
+                continue  # create_all() already built it with the column present
+            columns = {c["name"] for c in inspector.get_columns(table)}
+            if column in columns:
+                continue
+            connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _apply_additive_columns()
 
 
 @contextmanager

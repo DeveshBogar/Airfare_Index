@@ -18,8 +18,11 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from app.auth.roles import validate_role_carrier_pairing
 
 
 class Base(DeclarativeBase):
@@ -33,6 +36,57 @@ class Carrier(Base):
     name: Mapped[str] = mapped_column(String(64))
 
     quotes: Mapped[list["FareQuote"]] = relationship(back_populates="carrier")
+
+
+class User(Base):
+    """A login for one of the three segregated audiences — see
+    app.auth.roles for what each role may see and why the boundaries fall
+    where they do.
+
+    This table is what finally makes RegulatorFareFlag.reviewed_by and
+    .operator_responded_by mean something. Before it existed, the regulator
+    surface sat behind a single shared token: everyone holding the token was
+    indistinguishable from everyone else, so an audit trail was impossible
+    in principle, not merely unimplemented.
+
+    `carrier_code` is the scoping key for operator logins and is null for
+    every other role; the invariant is enforced below on insert and update
+    rather than trusted to callers.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(256))
+    role: Mapped[str] = mapped_column(String(16))  # citizen|regulator|operator
+
+    # Set only for role == "operator": the single carrier this login is
+    # allowed to see. Every operator query filters on it.
+    carrier_code: Mapped[str | None] = mapped_column(
+        ForeignKey("carriers.code"), nullable=True, default=None
+    )
+
+    display_name: Mapped[str] = mapped_column(String(128), default="")
+    organisation: Mapped[str] = mapped_column(String(128), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    last_login_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+
+    carrier: Mapped["Carrier | None"] = relationship()
+
+
+@event.listens_for(User, "before_insert")
+@event.listens_for(User, "before_update")
+def _validate_user_role_scope(_mapper, _connection, target: "User") -> None:
+    """Enforce the role/carrier invariant on every write path.
+
+    A mapper event rather than a check inside one constructor, because the
+    failure this guards against — an operator account with no carrier, which
+    would silently match zero rows and read as "the permission filter is
+    broken" — is worth catching no matter which code path created the row.
+    """
+    validate_role_carrier_pairing(target.role, target.carrier_code)
 
 
 class Route(Base):
@@ -224,11 +278,24 @@ class RegulatorFareFlag(Base):
 
     status: Mapped[str] = mapped_column(String(16), default="new")  # new|reviewed|dismissed
     review_note: Mapped[str] = mapped_column(String(2048), default="")
-    # A free-text label the reviewer types in. NOT an authenticated identity —
-    # see app.regulator.auth, which is a single shared token, not a login.
+    # The username of the authenticated regulator who recorded the decision.
+    # Written by the server from the session token, never accepted from the
+    # request body — see app.routers.regulator.
     reviewed_by: Mapped[str] = mapped_column(String(128), default="")
     reviewed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
     detected_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+    # The airline's own account of the flagged fare, filed by an authenticated
+    # operator login for that carrier. A flag is a statistical annotation on a
+    # real fare and explicitly not a finding of wrongdoing (see
+    # docs/regulator_flagging_methodology.md), so the airline being able to
+    # answer it before a human regulator acts is part of that boundary rather
+    # than a courtesy feature. Operators can write these three columns and
+    # nothing else on the row: they cannot change status, review_note, or any
+    # of the measured values.
+    operator_response: Mapped[str] = mapped_column(String(4096), default="")
+    operator_responded_by: Mapped[str] = mapped_column(String(128), default="")
+    operator_responded_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
     route: Mapped["Route"] = relationship()
     carrier: Mapped["Carrier"] = relationship()
@@ -261,6 +328,14 @@ class CitizenFareReport(Base):
     note: Mapped[str] = mapped_column(String(1024), default="")
     contact_email: Mapped[str] = mapped_column(String(256), default="")
     submitted_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+    # Which account filed this. Never null for anything submitted now —
+    # reporting requires signing in, so that a flood of junk is attributable
+    # to somebody and removable as a set. Nullable only because reports
+    # collected before that rule existed have no account to point at.
+    submitted_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, default=None
+    )
 
     status: Mapped[str] = mapped_column(String(16), default="new")  # new|reviewed
     reviewer_note: Mapped[str] = mapped_column(String(2048), default="")

@@ -1,4 +1,4 @@
-import { getRegulatorToken } from "./regulatorAuth";
+import { getToken, type AuthUser } from "./auth";
 
 const BASE = "/api";
 
@@ -365,6 +365,9 @@ export interface RegulatorFlag {
   reviewed_by: string;
   reviewed_at: string | null;
   detected_at: string;
+  operator_response: string;
+  operator_responded_by: string;
+  operator_responded_at: string | null;
 }
 
 // Heterogeneous by design — each factor carries its own type's real fields.
@@ -417,43 +420,77 @@ export interface CitizenReportCount {
   reviewed: number;
 }
 
-/** Thrown by the gated regulator calls so the UI can tell "you need a
- *  token" (401) apart from "the server has none configured" (503) — those
- *  need very different messages to the person looking at the screen. */
-export class RegulatorAuthError extends Error {
+export interface OperatorOverview {
+  carrier_code: string;
+  carrier_name: string;
+  index: CarrierIndexSeries | null;
+  headline: IndexDailyPoint[];
+  latest_index_value: number | null;
+  latest_index_date: string | null;
+  quotes_collected: number;
+  routes_covered: number;
+  flags_total: number;
+  flags_new: number;
+  flags_awaiting_response: number;
+}
+
+export interface Session {
+  token: string;
+  expires_at: string;
+  user: AuthUser;
+}
+
+/** Thrown when a call is refused for who you are (or aren't), so the UI can
+ *  tell "your session ended, sign in again" (401) apart from "you're signed
+ *  in, but this isn't yours" (403). Those need very different messages. */
+export class AuthError extends Error {
   readonly status: number;
 
   constructor(status: number, message: string) {
     super(message);
-    this.name = "RegulatorAuthError";
+    this.name = "AuthError";
     this.status = status;
   }
 }
 
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+/** Public reads. The token is attached when there is one — these endpoints
+ *  do not require it, but a couple behave slightly differently for a known
+ *  caller (a fare report gets attributed to the account that filed it). */
 async function getJSON<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
+  const res = await fetch(`${BASE}${path}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
   return res.json() as Promise<T>;
 }
 
-async function regulatorFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = getRegulatorToken();
+async function authedFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
       ...(init.body ? { "Content-Type": "application/json" } : {}),
-      ...(token ? { "X-Regulator-Token": token } : {}),
+      ...authHeaders(),
       ...(init.headers ?? {}),
     },
   });
-  if (res.status === 401 || res.status === 503) {
+  if (res.status === 401 || res.status === 403) {
     const detail = await res
       .json()
       .then((b) => (b as { detail?: string }).detail ?? "")
       .catch(() => "");
-    throw new RegulatorAuthError(res.status, detail || `HTTP ${res.status}`);
+    throw new AuthError(res.status, detail || `HTTP ${res.status}`);
   }
-  if (!res.ok) throw new Error(`${path} -> HTTP ${res.status}`);
+  if (!res.ok) {
+    const detail = await res
+      .json()
+      .then((b) => (b as { detail?: string }).detail ?? "")
+      .catch(() => "");
+    throw new Error(detail || `${path} -> HTTP ${res.status}`);
+  }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -480,40 +517,56 @@ export const api = {
   indexByCarrier: () => getJSON<ByCarrierIndex>("/index/by-carrier"),
   carriersFinancialContext: () => getJSON<CarrierFinancialContext[]>("/carriers/financial-context"),
 
-  // Regulator surface — flag listing/detail and the citizen-report count
-  // are public (same real data the rest of the dashboard shows); the write
-  // actions, the draft notice, and the raw citizen-report list are gated.
+  // Regulator surface — all of it requires the government role except
+  // submitting a fare report and the aggregate report count, which are the
+  // two things the public "Report a Fare" tab needs.
   regulatorFlags: (statusFilter?: string) =>
-    getJSON<RegulatorFlag[]>(
+    authedFetch<RegulatorFlag[]>(
       statusFilter ? `/regulator/flags?status_filter=${encodeURIComponent(statusFilter)}` : "/regulator/flags",
     ),
-  regulatorFlag: (id: number) => getJSON<RegulatorFlagDetail>(`/regulator/flags/${id}`),
-  reviewFlag: (id: number, body: { status: string; review_note: string; reviewed_by: string }) =>
-    regulatorFetch<RegulatorFlag>(`/regulator/flags/${id}/review`, {
+  regulatorFlag: (id: number) => authedFetch<RegulatorFlagDetail>(`/regulator/flags/${id}`),
+  // No reviewed_by: the server stamps the signed-in account, so the UI
+  // cannot attribute a decision to anyone else.
+  reviewFlag: (id: number, body: { status: string; review_note: string }) =>
+    authedFetch<RegulatorFlag>(`/regulator/flags/${id}/review`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
-  draftNotice: (id: number) => regulatorFetch<DraftNotice>(`/regulator/flags/${id}/draft-notice`),
+  draftNotice: (id: number) => authedFetch<DraftNotice>(`/regulator/flags/${id}/draft-notice`),
   citizenReportCount: () => getJSON<CitizenReportCount>("/regulator/citizen-reports/count"),
+  // Needs an account — reading is open, writing is not. See
+  // app/routers/regulator.py for why the write side is gated.
   submitCitizenReport: (body: CitizenFareReportInput) =>
-    fetch(`${BASE}/regulator/citizen-reports`, {
+    authedFetch<CitizenFareReport>("/regulator/citizen-reports", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    }).then(async (res) => {
-      if (!res.ok) {
-        const detail = await res
-          .json()
-          .then((b) => (b as { detail?: string }).detail ?? "")
-          .catch(() => "");
-        throw new Error(detail || `HTTP ${res.status}`);
-      }
-      return res.json() as Promise<CitizenFareReport>;
     }),
-  citizenReports: () => regulatorFetch<CitizenFareReport[]>("/regulator/citizen-reports"),
+  citizenReports: () => authedFetch<CitizenFareReport[]>("/regulator/citizen-reports"),
   reviewCitizenReport: (id: number, body: { status: string; reviewer_note: string }) =>
-    regulatorFetch<CitizenFareReport>(`/regulator/citizen-reports/${id}/review`, {
+    authedFetch<CitizenFareReport>(`/regulator/citizen-reports/${id}/review`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),
+
+  // Sign-in. The role lives on the account, so there is one login for all
+  // three audiences rather than a per-role form.
+  login: (username: string, password: string) =>
+    authedFetch<Session>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+  me: () => authedFetch<AuthUser>("/auth/me"),
+
+  // Airline surface — every one of these is scoped server-side to the
+  // signed-in operator's own carrier; there is no carrier parameter to pass.
+  operatorOverview: () => authedFetch<OperatorOverview>("/operator/overview"),
+  operatorFlags: () => authedFetch<RegulatorFlag[]>("/operator/flags"),
+  operatorFares: () => authedFetch<FareQuote[]>("/operator/fares?limit=200"),
+  respondToFlag: (id: number, response: string) =>
+    authedFetch<RegulatorFlag>(`/operator/flags/${id}/response`, {
+      method: "POST",
+      body: JSON.stringify({ response }),
+    }),
+
+  myReports: () => authedFetch<CitizenFareReport[]>("/citizen/my-reports"),
 };

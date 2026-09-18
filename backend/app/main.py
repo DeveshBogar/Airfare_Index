@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.session import init_db
 from app.logging_config import configure_logging
-from app.routers import fares, health, index, news, regulator, routes
+from app.routers import auth, citizen, fares, health, index, news, operator, regulator, routes
 
 configure_logging()
 
@@ -45,8 +45,11 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(auth.router)
 app.include_router(routes.router)
 app.include_router(fares.router)
 app.include_router(index.router)
 app.include_router(news.router)
 app.include_router(regulator.router)
+app.include_router(operator.router)
+app.include_router(citizen.router)

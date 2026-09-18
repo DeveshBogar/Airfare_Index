@@ -324,6 +324,13 @@ class RegulatorFlagOut(BaseModel):
     reviewed_by: str
     reviewed_at: dt.datetime | None = None
     detected_at: dt.datetime
+    # The airline's own account of the fare, if it has filed one. Public on
+    # the same reasoning that makes the flag itself public: showing a
+    # statistical annotation on a carrier's fare while hiding that carrier's
+    # answer to it would be the more loaded choice, not the neutral one.
+    operator_response: str = ""
+    operator_responded_by: str = ""
+    operator_responded_at: dt.datetime | None = None
 
 
 class RegulatorFlagDetailOut(RegulatorFlagOut):
@@ -339,7 +346,10 @@ class RegulatorFlagDetailOut(RegulatorFlagOut):
 class RegulatorFlagReviewIn(BaseModel):
     status: str  # reviewed|dismissed — validated against ALLOWED_REVIEW_STATUSES
     review_note: str = ""
-    reviewed_by: str = ""
+    # No reviewed_by field: the reviewer's identity is taken from the signed-in
+    # account server-side. Accepting it from the request body would let a
+    # caller sign someone else's name to a review decision, which would make
+    # the audit trail actively misleading rather than merely thin.
 
 
 class DraftNoticeOut(BaseModel):
@@ -388,6 +398,66 @@ class CitizenReportCountOut(BaseModel):
     total: int
     new: int
     reviewed: int
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class UserOut(BaseModel):
+    """The signed-in account, as the frontend needs to see it.
+
+    Note what is absent: password_hash, obviously, but also anything about
+    *other* accounts. A signed-in user learns who they are, never who else
+    exists.
+    """
+
+    id: int
+    username: str
+    role: str
+    role_label: str
+    display_name: str
+    organisation: str
+    carrier_code: str | None = None
+    carrier_name: str | None = None
+    last_login_at: dt.datetime | None = None
+
+
+class SessionOut(BaseModel):
+    token: str
+    expires_at: dt.datetime
+    user: UserOut
+
+
+class OperatorFlagResponseIn(BaseModel):
+    """An airline's written answer to a flag raised against it."""
+
+    response: str
+
+
+class OperatorOverviewOut(BaseModel):
+    """Everything the operator dashboard needs in one call, scoped to the
+    signed-in airline's own carrier.
+
+    `headline` is the market-wide index and is included deliberately: it is
+    already public on the citizen dashboard, and an operator cannot read its
+    own index movement as good or bad without it. Competitor-level detail —
+    other carriers' individual index series and fares — is not here, and the
+    operator router has no endpoint that serves it.
+    """
+
+    carrier_code: str
+    carrier_name: str
+    index: CarrierIndexSeriesOut | None = None
+    headline: list[IndexPointOut]
+    latest_index_value: float | None = None
+    latest_index_date: dt.date | None = None
+    quotes_collected: int
+    routes_covered: int
+    flags_total: int
+    flags_new: int
+    flags_awaiting_response: int
 
 
 class RoutePriceHistoryOut(BaseModel):
